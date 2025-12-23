@@ -1,3 +1,4 @@
+
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -27,10 +28,9 @@ interface NebulaProps {
 
 const ROTATION_SPEED = 0.035;
 
-// --- 背景宇宙组件 ---
+// --- 背景宇宙组件：提供深空的层次感 ---
 const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories }) => {
   const meshRef = useRef<THREE.Mesh>(null!);
-  const geoRef = useRef<THREE.SphereGeometry>(null!);
   
   const categoryColors = useMemo(() => {
     const colors = new Array(8).fill(new THREE.Color(0, 0, 0));
@@ -39,13 +39,6 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
     });
     return colors;
   }, [categories]);
-
-  useEffect(() => {
-    if (geoRef.current) {
-      // 强制设置超大包围球，解决旋转黑屏消失的核心逻辑
-      geoRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 10000);
-    }
-  }, []);
 
   const cosmosShader = useMemo(() => ({
     uniforms: {
@@ -67,16 +60,24 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
       uniform float uTime;
       uniform vec3 uColors[8];
       
+      float noise(vec2 st) {
+          return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123);
+      }
+
       void main() {
         vec3 color = vec3(0.005, 0.005, 0.015);
+        
         for(int i=0; i<8; i++) {
             float idx = float(i);
+            float pulse = sin(uTime * 0.15 + idx * 2.0) * 0.5 + 0.5;
             vec2 center = vec2(0.5) + vec2(cos(uTime * 0.05 + idx), sin(uTime * 0.03 + idx * 1.5)) * 0.4;
             float intensity = smoothstep(0.6, 0.0, length(vUv - center)) * 0.035;
             color += uColors[i] * intensity;
         }
+        
         float rim = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
         color += pow(rim, 3.0) * 0.04;
+
         gl_FragColor = vec4(color, 1.0);
       }
     `
@@ -85,7 +86,7 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
   const starPositions = useMemo(() => {
     const pos = new Float32Array(BACKGROUND_STAR_COUNT * 3);
     for (let i = 0; i < BACKGROUND_STAR_COUNT; i++) {
-      const r = 800 + Math.random() * 100;
+      const r = 500 + Math.random() * 200;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
@@ -97,24 +98,26 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
 
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.material.uniforms.uTime.value = state.clock.getElapsedTime();
+      // FIX: Cast meshRef.current.material to any to access uniforms as it is a ShaderMaterial
+      (meshRef.current.material as any).uniforms.uTime.value = state.clock.getElapsedTime();
     }
   });
 
   return (
     <Group>
-      <Mesh ref={meshRef} frustumCulled={false}>
-        <SphereGeometry ref={geoRef} args={[900, 32, 32]} />
+      <Mesh ref={meshRef} renderOrder={-10}>
+        <SphereGeometry args={[900, 32, 32]} />
         <ShaderMaterial 
           {...cosmosShader}
           side={THREE.BackSide}
           transparent
           depthWrite={false}
+          depthTest={true}
         />
       </Mesh>
       
-      <Points frustumCulled={false}>
-        <BufferGeometry onUpdate={(self: THREE.BufferGeometry) => { self.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000); }}>
+      <Points frustumCulled={false} renderOrder={-9}>
+        <BufferGeometry>
           <BufferAttribute 
             attach="attributes-position" 
             count={BACKGROUND_STAR_COUNT} 
@@ -129,6 +132,7 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
           opacity={0.3} 
           blending={THREE.AdditiveBlending}
           depthWrite={false}
+          depthTest={true}
         />
       </Points>
     </Group>
@@ -141,29 +145,31 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
 
   const lineGeometry = useMemo(() => {
     if (!activeCategory) return null;
+    
     const filteredStars = stars.filter(s => s.category === activeCategory);
     if (filteredStars.length < 2) return null;
+
     const positions: number[] = [];
     for (let i = 0; i < filteredStars.length - 1; i++) {
       positions.push(...filteredStars[i].position, ...filteredStars[i+1].position);
     }
+    
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    // 手动设置巨大包围球防止剔除
-    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000);
     return geometry;
   }, [stars, activeCategory]);
 
   useFrame((state) => {
     if (lineMaterialRef.current) {
-      lineMaterialRef.current.opacity = 0.15 + 0.1 * Math.sin(state.clock.getElapsedTime() * 1.5);
+      const t = state.clock.getElapsedTime();
+      lineMaterialRef.current.opacity = 0.15 + 0.1 * Math.sin(t * 1.5);
     }
   });
 
   if (!lineGeometry) return null;
 
   return (
-    <LineSegments geometry={lineGeometry} frustumCulled={false}>
+    <LineSegments geometry={lineGeometry} frustumCulled={false} renderOrder={5}>
       <LineBasicMaterial 
         ref={lineMaterialRef}
         color="#ffffff" 
@@ -171,12 +177,13 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
         opacity={0.2} 
         blending={THREE.AdditiveBlending}
         depthWrite={false}
+        depthTest={true}
       />
     </LineSegments>
   );
 };
 
-// --- 碎片星子 Shader ---
+// --- 碎星点渲染逻辑 ---
 const starVertexShader = `
   varying vec2 vUv;
   varying float vRotation;
@@ -188,11 +195,17 @@ const starVertexShader = `
   void main() {
     vUv = uv;
     vRotation = uTime * 0.2 + uFlickerPhase;
+    
     vec4 mvPosition = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
     float breathe = sin(uTime * 1.1 + uFlickerPhase) * 0.15;
     float scale = 1.0 + breathe;
-    if (uIsHovered > 0.5) scale = 2.2 + 0.3 * sin(uTime * 12.0);
-    else if (uIsSelected > 0.5) scale = 1.6 + 0.15 * sin(uTime * 8.0);
+    
+    if (uIsHovered > 0.5) {
+        scale = 2.2 + 0.3 * sin(uTime * 12.0);
+    } else if (uIsSelected > 0.5) {
+        scale = 1.6 + 0.15 * sin(uTime * 8.0);
+    }
+    
     mvPosition.xy += position.xy * scale;
     gl_Position = projectionMatrix * mvPosition;
   }
@@ -214,6 +227,7 @@ const starFragmentShader = `
   }
 
   float starRay(vec2 uv, float thickness, float rayLen) {
+    float l = length(uv);
     return smoothstep(thickness, 0.0, abs(uv.y)) * smoothstep(rayLen, 0.0, abs(uv.x));
   }
 
@@ -221,23 +235,36 @@ const starFragmentShader = `
     vec2 uv = vUv - 0.5;
     vec2 rotUv = rotate(uv, vRotation * (uStarType + 1.0) * 0.5);
     float dist = length(uv);
+    
     float core = smoothstep(0.08, 0.0, dist) * 2.8;
     float innerGlow = smoothstep(0.18, 0.0, dist) * 0.9;
+    
     float rays = 0.0;
     if (uStarType < 0.5) {
       rays += starRay(rotUv, 0.012, 0.48);
       rays += starRay(rotate(rotUv, 1.57), 0.012, 0.48);
     } else if (uStarType < 1.5) {
       for(int i=0; i<3; i++) {
-        rays += starRay(rotate(rotUv, float(i) * 1.047), 0.01, 0.42);
+        vec2 rv = rotate(rotUv, float(i) * 1.047);
+        rays += starRay(rv, 0.01, 0.42);
       }
     } else {
       rays += smoothstep(0.45, 0.0, dist) * 0.7;
     }
-    float flicker = mix(0.1, 1.0, pow(0.5 + 0.5 * sin(uTime * uFlickerSpeed + uFlickerPhase), 5.0)); 
+    
+    float flickerRaw = 0.5 + 0.5 * sin(uTime * uFlickerSpeed + uFlickerPhase);
+    float flicker = mix(0.1, 1.0, pow(flickerRaw, 5.0)); 
+    
     float intensity = (core + innerGlow + rays * 1.5) * flicker;
-    if (uIsHovered > 0.5) intensity *= (1.2 + 0.3 * sin(uTime * 15.0));
-    gl_FragColor = vec4(mix(uColor, vec3(1.0), core * 0.8) * intensity, (core * 0.6 + rays) * intensity);
+    
+    if (uIsHovered > 0.5) {
+        intensity *= (1.2 + 0.3 * sin(uTime * 15.0));
+    }
+    
+    vec3 white = vec3(1.0);
+    vec3 finalColor = mix(uColor, white, core * 0.8);
+    
+    gl_FragColor = vec4(finalColor * intensity, (core * 0.6 + rays) * intensity);
     if (gl_FragColor.a < 0.005) discard;
   }
 `;
@@ -253,20 +280,37 @@ const FragmentStar: React.FC<{
 }> = ({ star, index, isHovered, isSelected, onClick, onPointerOver, onPointerOut }) => {
   const meshRef = useRef<THREE.Mesh>(null!);
   const materialRef = useRef<any>(null);
+  
+  const jitteredColor = useMemo(() => {
+    const c = new THREE.Color(star.color);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    hsl.h += (Math.random() - 0.5) * 0.02; 
+    hsl.s = Math.max(0.6, Math.min(1.0, hsl.s + 0.1)); 
+    hsl.l = Math.max(0.65, Math.min(0.9, hsl.l + 0.05));
+    return new THREE.Color().setHSL(hsl.h, hsl.s, hsl.l);
+  }, [star.color, star.id]);
+
   const flickerSpeed = useMemo(() => 0.5 + Math.random() * 1.0, []);
   const flickerPhase = useMemo(() => Math.random() * 10000, []);
   const starType = useMemo(() => index % 3, [index]);
 
   useFrame((state) => {
-    if (materialRef.current?.uniforms) {
-      materialRef.current.uniforms.uTime.value = state.clock.getElapsedTime();
-      materialRef.current.uniforms.uIsHovered.value = isHovered ? 1.0 : 0.0;
-      materialRef.current.uniforms.uIsSelected.value = isSelected ? 1.0 : 0.0;
+    const time = state.clock.getElapsedTime();
+    const currentUniforms = materialRef.current?.uniforms;
+    if (currentUniforms) {
+      currentUniforms.uTime.value = time;
+      currentUniforms.uIsHovered.value = isHovered ? 1.0 : 0.0;
+      currentUniforms.uIsSelected.value = isSelected ? 1.0 : 0.0;
     }
-    if (meshRef.current && isHovered) {
-      meshRef.current.rotation.y = -(state.clock.getElapsedTime() * ROTATION_SPEED);
-    } else if (meshRef.current) {
-      meshRef.current.rotation.y = 0;
+
+    if (meshRef.current) {
+      if (isHovered) {
+        const groupRotation = time * ROTATION_SPEED;
+        meshRef.current.rotation.y = -groupRotation;
+      } else {
+        meshRef.current.rotation.y = 0;
+      }
     }
   });
 
@@ -278,17 +322,17 @@ const FragmentStar: React.FC<{
       onPointerOver={onPointerOver}
       onPointerOut={onPointerOut}
       frustumCulled={false}
+      renderOrder={10}
     >
-      <PlaneGeometry onUpdate={(self: THREE.BufferGeometry) => { self.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 1000); }}>
-        <BufferAttribute attach="attributes-position" count={4} array={new Float32Array([-1,-1,0, 1,-1,0, -1,1,0, 1,1,0])} itemSize={3} />
-      </PlaneGeometry>
+      <PlaneGeometry args={[star.size * 5.0, star.size * 5.0]} />
       <ShaderMaterial 
         ref={materialRef}
         transparent
         blending={THREE.AdditiveBlending}
         depthWrite={false}
+        depthTest={true}
         uniforms={{
-          uColor: { value: new THREE.Color(star.color) },
+          uColor: { value: jitteredColor },
           uTime: { value: 0 },
           uFlickerSpeed: { value: flickerSpeed },
           uFlickerPhase: { value: flickerPhase },
@@ -327,6 +371,8 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
 
     for (let i = 0; i < NEBULA_PARTICLE_COUNT; i++) {
       const i3 = i * 3;
+      const maxRadius = 65;
+      const verticalThickness = 7;
       const roleSelector = Math.random();
       const isTrajectoryRole = roleSelector < 0.12; 
       let x, y, z, angle;
@@ -355,11 +401,11 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
         }
       } else {
         const baseAngle = Math.random() * Math.PI * 2;
-        const rBase = 4.0 + Math.pow(Math.random(), 0.9) * 55.0;
+        const rBase = 4.0 + Math.pow(Math.random(), 0.9) * (maxRadius - 10.0);
         angle = baseAngle + (rBase * 2.4 * 0.85);
-        x = Math.cos(angle) * rBase + (Math.random() - 0.5) * (2.0 + Math.pow(rBase / 65.0, 2.5) * 12.0);
-        z = Math.sin(angle) * rBase * 0.75 + (Math.random() - 0.5) * (2.0 + Math.pow(rBase / 65.0, 2.5) * 12.0);
-        y = (Math.random() - 0.6) * (7.0 * Math.cos(Math.min(1.0, (rBase / 65.0) * 1.1) * Math.PI * 0.5));
+        x = Math.cos(angle) * rBase + (Math.random() - 0.5) * (2.0 + Math.pow(rBase / maxRadius, 2.5) * 12.0);
+        z = Math.sin(angle) * rBase * 0.75 + (Math.random() - 0.5) * (2.0 + Math.pow(rBase / maxRadius, 2.5) * 12.0);
+        y = (Math.random() - 0.6) * (verticalThickness * Math.cos(Math.min(1.0, (rBase / maxRadius) * 1.1) * Math.PI * 0.5));
         finalColor.copy(catColors[i % catColors.length] || whiteColor);
       }
       positions[i3] = x; positions[i3 + 1] = y; positions[i3 + 2] = z;
@@ -370,28 +416,31 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
     return { positions, colors, flickerOffsets, sizes };
   }, [categories]);
 
+  // 显式计算包围球，防止翻转时被剔除
   useEffect(() => {
-    if (nebulaRef.current) {
-      // 核心稳定性：强制巨大的包围球，防止剔除黑屏
-      nebulaRef.current.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000);
+    if (nebulaRef.current && nebulaRef.current.geometry) {
+      nebulaRef.current.geometry.computeBoundingSphere();
     }
-  }, []);
+  }, [nebulaData]);
 
   useFrame((state) => {
-    const currentRotation = state.clock.getElapsedTime() * ROTATION_SPEED;
+    const time = state.clock.getElapsedTime();
+    const currentRotation = time * ROTATION_SPEED;
     if (nebulaRef.current) nebulaRef.current.rotation.y = currentRotation;
     if (fragmentGroupRef.current) fragmentGroupRef.current.rotation.y = currentRotation;
-    if (nebulaMaterialRef.current?.userData.shader) {
-      nebulaMaterialRef.current.userData.shader.uniforms.uTime.value = state.clock.getElapsedTime();
+    if (nebulaMaterialRef.current && nebulaMaterialRef.current.userData.shader) {
+      nebulaMaterialRef.current.userData.shader.uniforms.uTime.value = time;
     }
   });
 
   return (
     <Group position={[0, 0, 0]}>
+      {/* 宇宙背景层 */}
       <CosmosBackground categories={categories} />
+
       <Group position={[0, 0, 0]}>
-        <Points ref={nebulaRef} frustumCulled={false}>
-          <BufferGeometry onUpdate={(self: THREE.BufferGeometry) => { self.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000); }}>
+        <Points ref={nebulaRef} frustumCulled={false} renderOrder={1}>
+          <BufferGeometry>
             <BufferAttribute attach="attributes-position" count={NEBULA_PARTICLE_COUNT} array={nebulaData.positions} itemSize={3} />
             <BufferAttribute attach="attributes-color" count={NEBULA_PARTICLE_COUNT} array={nebulaData.colors} itemSize={3} />
             <BufferAttribute attach="attributes-aFlicker" count={NEBULA_PARTICLE_COUNT} array={nebulaData.flickerOffsets} itemSize={1} />
@@ -400,7 +449,7 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
           <PointsMaterial 
             ref={nebulaMaterialRef}
             size={0.42} vertexColors transparent opacity={0.65} 
-            blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation={true}
+            blending={THREE.AdditiveBlending} depthWrite={false} depthTest={true} sizeAttenuation={true}
             onBeforeCompile={(shader) => {
               shader.uniforms.uTime = { value: 0 };
               shader.vertexShader = `
@@ -420,11 +469,19 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
         <Group ref={fragmentGroupRef}>
           {stars.map((star, idx) => (
             <FragmentStar 
-              key={star.id} index={idx} star={star}
+              key={star.id}
+              index={idx}
+              star={star}
               isHovered={hoveredStarId === star.id}
               isSelected={activeCategory === star.category}
-              onClick={(e: any) => { e.stopPropagation(); onStarClick(star); }}
-              onPointerOver={(e: any) => { e.stopPropagation(); setHoveredStar(star.id); }}
+              onClick={(e: any) => { 
+                e.stopPropagation(); 
+                onStarClick(star); 
+              }}
+              onPointerOver={(e: any) => {
+                e.stopPropagation();
+                setHoveredStar(star.id);
+              }}
               onPointerOut={() => setHoveredStar(null)}
             />
           ))}
