@@ -8,7 +8,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import Nebula from './components/Nebula.tsx';
 import { Category, DiaryEntry, StarPoint, CategoryInfo } from './types.ts';
 import { DEFAULT_CATEGORIES, CAMERA_START_POS } from './constants.ts';
-import { extractFragments } from './services/geminiService.ts';
+import { categorizeEntry } from './services/geminiService.ts';
 
 const AmbientLight = 'ambientLight' as any;
 const PointLight = 'pointLight' as any;
@@ -36,12 +36,13 @@ const InteractiveDiaryText: React.FC<{
   fragments: string[], 
   color: string,
   isEditing: boolean,
-  isLarge?: boolean
-}> = ({ text, fragments, color, isEditing, isLarge }) => {
+  isLarge?: boolean,
+  onFragmentClick?: (frag: string) => void
+}> = ({ text, fragments, color, isEditing, isLarge, onFragmentClick }) => {
   if (!text) return null;
-  if (fragments.length === 0) return <span className={isEditing ? "opacity-100 text-white/70" : "opacity-90"}>{text}</span>;
+  if (!fragments || fragments.length === 0) return <span className={isEditing ? "opacity-100 text-white/70" : "opacity-90"}>{text}</span>;
 
-  const sortedFrags = [...fragments].sort((a, b) => b.length - a.length);
+  const sortedFrags = [...new Set(fragments)].sort((a, b) => b.length - a.length);
   const escapedFrags = sortedFrags.map(f => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedFrags.join('|')})`, 'g');
   const parts = text.split(regex);
@@ -54,8 +55,18 @@ const InteractiveDiaryText: React.FC<{
           return (
             <span
               key={i}
-              className={`${isLarge ? 'font-medium' : 'font-normal'} px-2 rounded transition-all duration-300 mx-0.5`}
-              style={{ backgroundColor: isEditing ? `${color}66` : 'transparent', color: '#fff', borderBottom: `2.5px solid ${color}` }}
+              onClick={(e) => {
+                if (isEditing && onFragmentClick) {
+                  e.stopPropagation();
+                  onFragmentClick(part);
+                }
+              }}
+              className={`${isLarge ? 'font-medium' : 'font-normal'} px-2 rounded transition-all duration-300 mx-0.5 ${isEditing ? 'cursor-pointer hover:brightness-125 pointer-events-auto ring-1 ring-white/10' : ''}`}
+              style={{ 
+                backgroundColor: isEditing ? `${color}44` : 'transparent', 
+                color: '#fff', 
+                borderBottom: `2.5px solid ${color}` 
+              }}
             >
               {part}
             </span>
@@ -120,14 +131,21 @@ const App: React.FC = () => {
     const start = textareaRef.current.selectionStart;
     const end = textareaRef.current.selectionEnd;
     const selection = inputText.substring(start, end).trim();
-    if (selection && selection.length > 0) {
-      if (manualFragments.includes(selection)) {
-        setManualFragments(prev => prev.filter(f => f !== selection));
-      } else {
-        setManualFragments(prev => [...prev, selection]);
-      }
+    
+    if (selection && selection.length > 1) {
+      setManualFragments(prev => {
+        if (prev.includes(selection)) {
+           // 如果重复划选已经标记的文本，则取消标记
+           return prev.filter(f => f !== selection);
+        }
+        return [...prev, selection];
+      });
       textareaRef.current.setSelectionRange(end, end);
     }
+  };
+
+  const removeManualFragment = (frag: string) => {
+    setManualFragments(prev => prev.filter(f => f !== frag));
   };
 
   const spawnStar = (content: string, categoryId: Category, entryId: string) => {
@@ -155,8 +173,10 @@ const App: React.FC = () => {
     if (!inputText.trim()) return;
     setLoading(true);
     try {
-      const { fragments: geminiFragments, categoryId } = await extractFragments(inputText, categories);
-      const finalFragments = manualFragments.length > 0 ? manualFragments : geminiFragments;
+      // 仅使用 Gemini 进行分类，碎片完全依赖用户划选
+      const categoryId = await categorizeEntry(inputText, categories);
+      
+      const finalFragments = [...new Set(manualFragments)];
       
       const newEntry: DiaryEntry = {
         id: Date.now().toString(),
@@ -167,14 +187,20 @@ const App: React.FC = () => {
       };
       setEntries(prev => [newEntry, ...prev]);
       
-      const frags = finalFragments.map(f => ({
-        id: Math.random().toString(36).substr(2, 9),
-        text: f,
-        category: categoryId,
-        entryId: newEntry.id
-      }));
+      // 仅当用户标记了碎片时，才生成待具现列表
+      if (finalFragments.length > 0) {
+        const frags = finalFragments.map(f => ({
+          id: Math.random().toString(36).substr(2, 9),
+          text: f,
+          category: categoryId,
+          entryId: newEntry.id
+        }));
+        setPendingFragments(prev => [...prev, ...frags]);
+      } else {
+        // 如果没有碎片，给出简单反馈并直接进入历史
+        console.log("No fragments marked, archiving directly to history.");
+      }
       
-      setPendingFragments(prev => [...prev, ...frags]);
       setIsWriting(false);
       setInputText('');
       setManualFragments([]);
@@ -189,7 +215,6 @@ const App: React.FC = () => {
     const frag = pendingFragments.find(f => f.id === fragId);
     if (frag) {
       spawnStar(frag.text, category, entryId);
-      // Fix: Filter by comparing fragId string with fragment object's id property
       setPendingFragments(prev => prev.filter(f => f.id !== fragId));
     }
   };
@@ -365,17 +390,30 @@ const App: React.FC = () => {
             <div className="relative w-full max-w-[80rem] flex flex-col items-center h-full">
               <div className="relative w-full flex-1 flex flex-col items-center justify-center max-h-[50vh] mt-[5vh]">
                 <div className="absolute inset-0 pointer-events-none text-2xl md:text-3xl font-light text-center leading-[1.8] px-8 select-none overflow-y-auto no-scrollbar tracking-wide">
-                  <InteractiveDiaryText text={inputText} fragments={manualFragments} color="#22d3ee" isEditing={true} />
+                  <InteractiveDiaryText 
+                    text={inputText} 
+                    fragments={manualFragments} 
+                    color="#22d3ee" 
+                    isEditing={true} 
+                    onFragmentClick={removeManualFragment}
+                  />
                 </div>
                 <textarea 
-                  ref={textareaRef} autoFocus value={inputText} onChange={(e) => setInputText(e.target.value)} onMouseUp={handleTextSelection}
-                  placeholder="记录此刻的星尘..." className="w-full h-full bg-transparent border-none outline-none resize-none text-2xl md:text-3xl font-light text-center placeholder:text-white/40 no-scrollbar leading-[1.8] text-transparent caret-white" 
+                  ref={textareaRef} 
+                  autoFocus 
+                  value={inputText} 
+                  onChange={(e) => setInputText(e.target.value)} 
+                  onMouseUp={handleTextSelection}
+                  placeholder="记录此刻的星尘..." 
+                  className="w-full h-full bg-transparent border-none outline-none resize-none text-2xl md:text-3xl font-light text-center placeholder:text-white/40 no-scrollbar leading-[1.8] text-transparent caret-white" 
                 />
               </div>
               <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} className="flex gap-16 mt-12 py-10 border-t border-white/10 w-full justify-center items-center">
                 <button onClick={() => { setIsWriting(false); setManualFragments([]); }} className="text-[14px] uppercase tracking-[0.4em] text-white/70 italic">放弃</button>
                 <button disabled={loading || !inputText.trim()} onClick={handleRealizeStardust} className="px-24 py-5 bg-white/15 hover:bg-white/25 text-white rounded-full font-normal uppercase tracking-[1em] border border-white/30">{loading ? '感应中...' : '具现'}</button>
-                <div className="text-[14px] uppercase tracking-[0.4em] text-white/70 italic">{manualFragments.length} 碎片</div>
+                <div className="text-[14px] uppercase tracking-[0.4em] text-white/70 italic min-w-[80px] text-center">
+                   {manualFragments.length > 0 ? `${manualFragments.length} 碎片` : "无碎片"}
+                </div>
               </motion.div>
             </div>
           </motion.div>
@@ -464,7 +502,7 @@ const App: React.FC = () => {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/95 backdrop-blur-[50px] flex items-center justify-center z-[120]">
             <div className="flex flex-col items-center gap-12">
                <div className="w-16 h-16 border border-white/30 border-t-white animate-spin rounded-full" />
-               <div className="text-[14px] font-light uppercase tracking-[1em] text-white animate-pulse">感应中...</div>
+               <div className="text-[14px] font-light uppercase tracking-[1em] text-white animate-pulse">归纳中...</div>
             </div>
           </motion.div>
         )}

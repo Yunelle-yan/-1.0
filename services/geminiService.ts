@@ -3,9 +3,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Category, CategoryInfo } from "../types.ts";
 
 /**
- * 使用 Gemini 从日记原文中摘录最具代表性的原句，并对日记进行分类。
+ * 使用 Gemini 分析日记内容，并将其归类到最合适的现有类别中。
  */
-export async function extractFragments(text: string, currentCategories: CategoryInfo[]): Promise<{ fragments: string[]; categoryId: string }> {
+export async function categorizeEntry(text: string, currentCategories: CategoryInfo[]): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const categoryOptions = currentCategories.map(c => `${c.id} (${c.name})`).join(", ");
 
@@ -14,32 +14,25 @@ export async function extractFragments(text: string, currentCategories: Category
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [{
-          text: `请分析这段日记并完成以下两个任务：
-1. 从日记正文中挑选出 2-4 句最具代表性、最能体现当下情感的“原句”作为具象碎片。
-   - 必须是原文中的字句，严禁进行任何形式的总结、重写、修饰或字词修改。
-   - 每个碎片不宜过长，如果句子过长，请截取原文中连续且完整的片段。
-2. 将该条目分类到以下现有的类别 ID 中：[${currentCategories.map(c => c.id).join(", ")}]。
-类别参考上下文：${categoryOptions}。
+          text: `请分析这段日记内容，并从以下现有的类别 ID 中选择一个最匹配的：[${currentCategories.map(c => c.id).join(", ")}]。
+类别参考含义：${categoryOptions}。
+只需返回选中的类别 ID 字符串，不要有任何额外解释。
 
 日记内容： "${text}"`
         }]
       },
       config: {
+        // 使用 JSON 模式确保返回格式稳定
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            fragments: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: "直接从原文中摘录的 2-4 个原句片段。"
-            },
             categoryId: {
               type: Type.STRING,
-              description: "从提供列表中选择的分类 ID。"
+              description: "匹配的分类 ID。"
             }
           },
-          required: ["fragments", "categoryId"]
+          required: ["categoryId"]
         }
       }
     });
@@ -47,20 +40,12 @@ export async function extractFragments(text: string, currentCategories: Category
     const jsonStr = response.text?.trim() || '{}';
     const result = JSON.parse(jsonStr);
     
-    // 验证返回的 categoryId 是否存在
+    // 验证返回的 categoryId 是否有效
     const validId = currentCategories.find(c => c.id === result.categoryId) ? result.categoryId : currentCategories[0].id;
-    
-    return {
-      fragments: Array.isArray(result.fragments) ? result.fragments : [],
-      categoryId: validId
-    };
+    return validId;
   } catch (error) {
-    console.error("Gemini fragment extraction failed:", error);
-    // 兜底方案：如果失败，直接切分原文前 30 个字作为一个片段
-    return { 
-      fragments: [text.length > 30 ? text.slice(0, 30) + '...' : text], 
-      categoryId: currentCategories[0].id 
-    };
+    console.error("Gemini categorization failed:", error);
+    return currentCategories[0].id;
   }
 }
 
