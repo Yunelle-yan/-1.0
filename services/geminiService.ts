@@ -51,12 +51,13 @@ export async function categorizeEntry(text: string, currentCategories: CategoryI
 
 /**
  * 使用 Gemini 的多模态能力将 Base64 格式的音频转录为文本。
+ * Updated to use 'gemini-2.5-flash-native-audio-preview-09-2025' for specialized audio processing.
  */
 export async function transcribeAudio(base64Audio: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-native-audio-preview-09-2025',
       contents: {
         parts: [
           { inlineData: { data: base64Audio, mimeType: 'audio/webm' } },

@@ -64,6 +64,15 @@
     .serif-tracking {
       letter-spacing: 0.05em;
     }
+    
+    /* 文字记录模式对齐修正：消除 Textarea 与 Overlay 的重影 */
+    textarea {
+      box-sizing: border-box !important;
+      padding: 0;
+      margin: 0;
+      font-feature-settings: "tnum";
+      font-variant-numeric: tabular-nums;
+    }
   </style>
 <script type="importmap">
 {

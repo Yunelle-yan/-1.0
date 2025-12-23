@@ -1,9 +1,11 @@
 
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Category, CategoryInfo, StarPoint } from '../types.ts';
-import { NEBULA_PARTICLE_COUNT, BACKGROUND_STAR_COUNT } from '../constants.ts';
+import { NEBULA_PARTICLE_COUNT } from '../constants.ts';
 
 const Group = 'group' as any;
 const Points = 'points' as any;
@@ -29,7 +31,7 @@ interface NebulaProps {
 const ROTATION_SPEED = 0.035;
 
 // --- 背景宇宙组件 ---
-const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories }) => {
+const CosmosBackground: React.FC<{ categories: CategoryInfo[], dimFactor: number }> = ({ categories, dimFactor }) => {
   const meshRef = useRef<THREE.Mesh>(null!);
   const geoRef = useRef<THREE.SphereGeometry>(null!);
   
@@ -50,7 +52,8 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
   const cosmosShader = useMemo(() => ({
     uniforms: {
       uTime: { value: 0 },
-      uColors: { value: categoryColors }
+      uColors: { value: categoryColors },
+      uDimFactor: { value: 1.0 }
     },
     vertexShader: `
       varying vec2 vUv;
@@ -66,39 +69,28 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
       varying vec3 vNormal;
       uniform float uTime;
       uniform vec3 uColors[8];
+      uniform float uDimFactor;
       
       void main() {
-        vec3 color = vec3(0.005, 0.005, 0.015);
+        vec3 color = vec3(0.005, 0.005, 0.015) * uDimFactor;
         for(int i=0; i<8; i++) {
             float idx = float(i);
             vec2 center = vec2(0.5) + vec2(cos(uTime * 0.05 + idx), sin(uTime * 0.03 + idx * 1.5)) * 0.4;
             float intensity = smoothstep(0.6, 0.0, length(vUv - center)) * 0.035;
-            color += uColors[i] * intensity;
+            color += uColors[i] * intensity * uDimFactor;
         }
         float rim = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
-        color += pow(rim, 3.0) * 0.04;
+        color += pow(rim, 3.0) * 0.04 * uDimFactor;
         gl_FragColor = vec4(color, 1.0);
       }
     `
   }), [categoryColors]);
 
-  const starPositions = useMemo(() => {
-    const pos = new Float32Array(BACKGROUND_STAR_COUNT * 3);
-    for (let i = 0; i < BACKGROUND_STAR_COUNT; i++) {
-      const r = 800 + Math.random() * 100;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-      pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-      pos[i * 3 + 2] = r * Math.cos(phi);
-    }
-    return pos;
-  }, []);
-
   useFrame((state) => {
     if (meshRef.current) {
-      // Fix: cast material to any to access uniforms property which exists on ShaderMaterial
-      (meshRef.current.material as any).uniforms.uTime.value = state.clock.getElapsedTime();
+      const mat = meshRef.current.material as any;
+      mat.uniforms.uTime.value = state.clock.getElapsedTime();
+      mat.uniforms.uDimFactor.value = THREE.MathUtils.lerp(mat.uniforms.uDimFactor.value, dimFactor, 0.05);
     }
   });
 
@@ -113,25 +105,6 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
           depthWrite={false}
         />
       </Mesh>
-      
-      <Points frustumCulled={false}>
-        <BufferGeometry onUpdate={(self: THREE.BufferGeometry) => { self.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000); }}>
-          <BufferAttribute 
-            attach="attributes-position" 
-            count={BACKGROUND_STAR_COUNT} 
-            array={starPositions} 
-            itemSize={3} 
-          />
-        </BufferGeometry>
-        <PointsMaterial 
-          size={0.25} 
-          color="#ffffff" 
-          transparent 
-          opacity={0.3} 
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </Points>
     </Group>
   );
 };
@@ -156,7 +129,7 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
 
   useFrame((state) => {
     if (lineMaterialRef.current) {
-      lineMaterialRef.current.opacity = 0.15 + 0.1 * Math.sin(state.clock.getElapsedTime() * 1.5);
+      lineMaterialRef.current.opacity = 0.4 + 0.2 * Math.sin(state.clock.getElapsedTime() * 1.5);
     }
   });
 
@@ -168,7 +141,7 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
         ref={lineMaterialRef}
         color="#ffffff" 
         transparent 
-        opacity={0.2} 
+        opacity={0.6} 
         blending={THREE.AdditiveBlending}
         depthWrite={false}
       />
@@ -184,16 +157,20 @@ const starVertexShader = `
   uniform float uFlickerPhase;
   uniform float uIsHovered;
   uniform float uIsSelected;
+  uniform float uSize;
   
   void main() {
     vUv = uv;
     vRotation = uTime * 0.2 + uFlickerPhase;
     vec4 mvPosition = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-    float breathe = sin(uTime * 1.1 + uFlickerPhase) * 0.15;
-    float scale = 1.0 + breathe;
-    if (uIsHovered > 0.5) scale = 2.2 + 0.3 * sin(uTime * 12.0);
-    else if (uIsSelected > 0.5) scale = 1.6 + 0.15 * sin(uTime * 8.0);
-    mvPosition.xy += position.xy * scale;
+    float breathe = sin(uTime * 0.8 + uFlickerPhase) * 0.15;
+    float baseScale = uSize * 1.8;
+    float currentScale = baseScale * (1.0 + breathe);
+    
+    if (uIsHovered > 0.5) currentScale *= 2.0 + 0.3 * sin(uTime * 12.0);
+    else if (uIsSelected > 0.5) currentScale *= 1.4 + 0.15 * sin(uTime * 6.0);
+    
+    mvPosition.xy += position.xy * currentScale;
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -221,24 +198,25 @@ const starFragmentShader = `
     vec2 uv = vUv - 0.5;
     vec2 rotUv = rotate(uv, vRotation * (uStarType + 1.0) * 0.5);
     float dist = length(uv);
-    float core = smoothstep(0.08, 0.0, dist) * 2.8;
-    float innerGlow = smoothstep(0.18, 0.0, dist) * 0.9;
+    float core = smoothstep(0.12, 0.0, dist) * 4.0;
+    float innerGlow = smoothstep(0.25, 0.0, dist) * 1.5;
     float rays = 0.0;
     if (uStarType < 0.5) {
-      rays += starRay(rotUv, 0.012, 0.48);
-      rays += starRay(rotate(rotUv, 1.57), 0.012, 0.48);
+      rays += starRay(rotUv, 0.02, 0.48);
+      rays += starRay(rotate(rotUv, 1.57), 0.02, 0.48);
     } else if (uStarType < 1.5) {
       for(int i=0; i<3; i++) {
-        rays += starRay(rotate(rotUv, float(i) * 1.047), 0.01, 0.42);
+        rays += starRay(rotate(rotUv, float(i) * 1.047), 0.015, 0.45);
       }
     } else {
-      rays += smoothstep(0.45, 0.0, dist) * 0.7;
+      rays += smoothstep(0.5, 0.0, dist) * 0.85;
     }
-    float flicker = mix(0.1, 1.0, pow(0.5 + 0.5 * sin(uTime * uFlickerSpeed + uFlickerPhase), 5.0)); 
-    float intensity = (core + innerGlow + rays * 1.5) * flicker;
-    if (uIsHovered > 0.5) intensity *= (1.2 + 0.3 * sin(uTime * 15.0));
-    gl_FragColor = vec4(mix(uColor, vec3(1.0), core * 0.8) * intensity, (core * 0.6 + rays) * intensity);
-    if (gl_FragColor.a < 0.005) discard;
+    float flicker = mix(0.4, 1.0, pow(0.5 + 0.5 * sin(uTime * uFlickerSpeed + uFlickerPhase), 3.0)); 
+    float intensity = (core + innerGlow + rays * 2.2) * flicker;
+    if (uIsHovered > 0.5) intensity *= (1.3 + 0.4 * sin(uTime * 18.0));
+    vec3 finalColor = mix(uColor, vec3(1.0), core * 0.9);
+    gl_FragColor = vec4(finalColor * intensity, (core * 0.8 + rays * 0.7 + innerGlow * 0.3) * intensity);
+    if (gl_FragColor.a < 0.01) discard;
   }
 `;
 
@@ -253,7 +231,7 @@ const FragmentStar: React.FC<{
 }> = ({ star, index, isHovered, isSelected, onClick, onPointerOver, onPointerOut }) => {
   const meshRef = useRef<THREE.Mesh>(null!);
   const materialRef = useRef<any>(null);
-  const flickerSpeed = useMemo(() => 0.5 + Math.random() * 1.0, []);
+  const flickerSpeed = useMemo(() => 0.5 + Math.random() * 0.7, []);
   const flickerPhase = useMemo(() => Math.random() * 10000, []);
   const starType = useMemo(() => index % 3, [index]);
 
@@ -264,9 +242,7 @@ const FragmentStar: React.FC<{
       materialRef.current.uniforms.uIsSelected.value = isSelected ? 1.0 : 0.0;
     }
     if (meshRef.current && isHovered) {
-      meshRef.current.rotation.y = -(state.clock.getElapsedTime() * ROTATION_SPEED);
-    } else if (meshRef.current) {
-      meshRef.current.rotation.y = 0;
+      meshRef.current.rotation.y = -(state.clock.getElapsedTime() * ROTATION_SPEED * 1.5);
     }
   });
 
@@ -279,14 +255,13 @@ const FragmentStar: React.FC<{
       onPointerOut={onPointerOut}
       frustumCulled={false}
     >
-      <PlaneGeometry onUpdate={(self: THREE.BufferGeometry) => { self.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 1000); }}>
-        <BufferAttribute attach="attributes-position" count={4} array={new Float32Array([-1,-1,0, 1,-1,0, -1,1,0, 1,1,0])} itemSize={3} />
-      </PlaneGeometry>
+      <PlaneGeometry args={[1, 1]} />
       <ShaderMaterial 
         ref={materialRef}
         transparent
         blending={THREE.AdditiveBlending}
         depthWrite={false}
+        depthTest={true}
         uniforms={{
           uColor: { value: new THREE.Color(star.color) },
           uTime: { value: 0 },
@@ -294,11 +269,88 @@ const FragmentStar: React.FC<{
           uFlickerPhase: { value: flickerPhase },
           uIsHovered: { value: 0.0 },
           uIsSelected: { value: 0.0 },
-          uStarType: { value: starType }
+          uStarType: { value: starType },
+          uSize: { value: star.size || 2.0 } 
         }}
         vertexShader={starVertexShader}
         fragmentShader={starFragmentShader}
       />
+      
+      {/* 连线模式下的文字泡泡：强化横向伸展排版 */}
+      <Html 
+        distanceFactor={32} 
+        position={[2.5, 0, 0]} 
+        center 
+        pointerEvents="auto"
+        style={{ 
+          transition: 'all 0.4s cubic-bezier(0.23, 1, 0.32, 1)',
+          zIndex: isHovered ? 300 : 1
+        }}
+      >
+        <AnimatePresence>
+          {isSelected && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, x: -15 }}
+              animate={{ 
+                opacity: 1, 
+                // 适度放大 1.2 倍
+                scale: isHovered ? 1.2 : 1.0, 
+                x: 0,
+              }}
+              exit={{ opacity: 0, scale: 0.95, x: 15 }}
+              transition={{ duration: 0.3, ease: 'easeOut' }}
+              className="select-none cursor-pointer flex flex-row items-center gap-5"
+              onMouseEnter={onPointerOver}
+              onMouseLeave={onPointerOut}
+              onClick={onClick}
+            >
+              {/* 横向排列的锚点 */}
+              <motion.div 
+                className="w-4 h-4 rounded-full shrink-0"
+                animate={{
+                  scale: isHovered ? 1.2 : 1.0,
+                  backgroundColor: isHovered ? '#fff' : star.color,
+                }}
+                style={{ 
+                  backgroundColor: star.color, 
+                  boxShadow: isHovered 
+                    ? `0 0 25px 5px ${star.color}, 0 0 50px ${star.color}44`
+                    : `0 0 12px 2px ${star.color}aa`,
+                  border: '2px solid rgba(255,255,255,0.7)'
+                }}
+              />
+
+              {/* 横向展开的长气泡：强制单行显示不换行 */}
+              <motion.div 
+                className="px-8 py-5 rounded-2xl border border-white/40 backdrop-blur-[45px] shadow-[0_25px_70px_-15px_rgba(0,0,0,1)] flex items-center h-auto min-h-[64px]"
+                animate={{
+                  // 显著增加悬停时的横向宽度，使其尽量在单行内展开
+                  maxWidth: isHovered ? '1600px' : '300px',
+                  backgroundColor: isHovered ? 'rgba(0, 0, 0, 0.95)' : 'rgba(0, 0, 0, 0.7)',
+                }}
+                style={{ 
+                  boxShadow: isHovered 
+                    ? `0 25px 70px -10px ${star.color}88, 0 0 0.5px rgba(255,255,255,0.3)`
+                    : `0 10px 30px -10px rgba(0,0,0,0.6)`,
+                  transition: 'max-width 0.6s cubic-bezier(0.19, 1, 0.22, 1)'
+                }}
+              >
+                <span 
+                  className={`text-[24px] md:text-[30px] italic font-medium tracking-tight text-white leading-none block transition-all duration-300 ${!isHovered ? 'truncate max-w-[220px]' : ''}`}
+                  style={{ 
+                    textShadow: isHovered ? `0 0 30px ${star.color}` : 'none',
+                    // 核心修改：强制不换行，保持纯横向排版
+                    whiteSpace: 'nowrap',
+                    display: 'inline-block'
+                  }}
+                >
+                  “ {star.content} ”
+                </span>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </Html>
     </Mesh>
   );
 };
@@ -307,6 +359,8 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
   const nebulaRef = useRef<THREE.Points>(null!);
   const fragmentGroupRef = useRef<THREE.Group>(null!);
   const nebulaMaterialRef = useRef<THREE.PointsMaterial>(null!);
+
+  const dimFactor = activeCategory ? 0.2 : 1.0;
 
   const nebulaData = useMemo(() => {
     const positions = new Float32Array(NEBULA_PARTICLE_COUNT * 3);
@@ -380,14 +434,17 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
     const currentRotation = state.clock.getElapsedTime() * ROTATION_SPEED;
     if (nebulaRef.current) nebulaRef.current.rotation.y = currentRotation;
     if (fragmentGroupRef.current) fragmentGroupRef.current.rotation.y = currentRotation;
+    
     if (nebulaMaterialRef.current?.userData.shader) {
-      nebulaMaterialRef.current.userData.shader.uniforms.uTime.value = state.clock.getElapsedTime();
+      const shader = nebulaMaterialRef.current.userData.shader;
+      shader.uniforms.uTime.value = state.clock.getElapsedTime();
+      shader.uniforms.uDimFactor.value = THREE.MathUtils.lerp(shader.uniforms.uDimFactor.value, dimFactor, 0.05);
     }
   });
 
   return (
     <Group position={[0, 0, 0]}>
-      <CosmosBackground categories={categories} />
+      <CosmosBackground categories={categories} dimFactor={dimFactor} />
       <Group position={[0, 0, 0]}>
         <Points ref={nebulaRef} frustumCulled={false}>
           <BufferGeometry onUpdate={(self: THREE.BufferGeometry) => { self.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000); }}>
@@ -402,15 +459,31 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
             blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation={true}
             onBeforeCompile={(shader) => {
               shader.uniforms.uTime = { value: 0 };
+              shader.uniforms.uDimFactor = { value: 1.0 };
+              
               shader.vertexShader = `
                 uniform float uTime;
                 attribute float aFlicker;
                 attribute float aSize;
                 varying float vTwinkle;
                 ${shader.vertexShader}
-              `.replace(`#include <begin_vertex>`, `#include <begin_vertex>\ngl_PointSize = size * aSize;`)
-              .replace(`#include <color_vertex>`, `#include <color_vertex>\nfloat speed = 1.2 + fract(aFlicker * 0.123) * 1.8;\nvTwinkle = 0.15 + 0.85 * pow(0.5 + 0.5 * sin(uTime * speed + aFlicker), 2.5);`)
-              .replace(`gl_FragColor = vec4( diffuse, opacity );`, `gl_FragColor = vec4( diffuse * vTwinkle, opacity );`);
+              `.replace(
+                '#include <project_vertex>',
+                '#include <project_vertex>\n gl_PointSize *= aSize;'
+              ).replace(
+                '#include <color_vertex>',
+                `#include <color_vertex>\nfloat speed = 1.2 + fract(aFlicker * 0.123) * 1.8;\nvTwinkle = 0.15 + 0.85 * pow(0.5 + 0.5 * sin(uTime * speed + aFlicker), 2.5);`
+              );
+              
+              shader.fragmentShader = `
+                uniform float uDimFactor;
+                varying float vTwinkle;
+                ${shader.fragmentShader}
+              `.replace(
+                'gl_FragColor = vec4( diffuse, opacity );',
+                'gl_FragColor = vec4( diffuse * vTwinkle * uDimFactor, opacity );'
+              );
+              
               nebulaMaterialRef.current.userData.shader = shader;
             }}
           />
