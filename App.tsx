@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
@@ -39,15 +38,9 @@ const InteractiveDiaryText: React.FC<{
   isLarge?: boolean
 }> = ({ text, fragments, color, isEditing, isLarge }) => {
   if (!text) return null;
-  // 过滤掉空字符串碎片并去重
-  const validFragments = Array.from(new Set(fragments.filter(f => f && f.trim().length > 0)));
-  
-  if (validFragments.length === 0) {
-    return <span className={isEditing ? "opacity-80 text-white" : "opacity-90"}>{text}</span>;
-  }
+  if (fragments.length === 0) return <span className={isEditing ? "opacity-100 text-white/70" : "opacity-90"}>{text}</span>;
 
-  // 按长度降序排列，确保优先匹配长句
-  const sortedFrags = [...validFragments].sort((a, b) => b.length - a.length);
+  const sortedFrags = [...fragments].sort((a, b) => b.length - a.length);
   const escapedFrags = sortedFrags.map(f => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedFrags.join('|')})`, 'g');
   const parts = text.split(regex);
@@ -55,25 +48,19 @@ const InteractiveDiaryText: React.FC<{
   return (
     <>
       {parts.map((part, i) => {
-        const isFragment = validFragments.includes(part);
+        const isFragment = fragments.includes(part);
         if (isFragment) {
           return (
-            <motion.span
-              key={`${part}-${i}`}
-              initial={isEditing ? { backgroundColor: `${color}00` } : {}}
-              animate={isEditing ? { 
-                backgroundColor: [`${color}33`, `${color}66`, `${color}33`],
-                boxShadow: [`0 0 0px ${color}00`, `0 0 15px ${color}44`, `0 0 0px ${color}00`]
-              } : {}}
-              transition={{ repeat: Infinity, duration: 2.5, ease: "easeInOut" }}
-              className={`${isLarge ? 'font-medium' : 'font-normal'} px-1.5 rounded transition-all duration-500 mx-0.5 relative inline-block`}
-              style={{ borderBottom: `2px solid ${color}`, color: '#fff' }}
+            <span
+              key={i}
+              className={`${isLarge ? 'font-medium' : 'font-normal'} px-2 rounded transition-all duration-300 mx-0.5`}
+              style={{ backgroundColor: isEditing ? `${color}66` : 'transparent', color: '#fff', borderBottom: `2.5px solid ${color}` }}
             >
               {part}
-            </motion.span>
+            </span>
           );
         }
-        return <span key={i} className={isEditing ? "opacity-70 text-white" : "opacity-80"}>{part}</span>;
+        return <span key={i} className={isEditing ? "opacity-90 text-white" : "opacity-70"}>{part}</span>;
       })}
     </>
   );
@@ -131,28 +118,14 @@ const App: React.FC = () => {
     if (!textareaRef.current || !isWriting) return;
     const start = textareaRef.current.selectionStart;
     const end = textareaRef.current.selectionEnd;
-    
-    // 只有在选中有内容时才触发逻辑
-    if (start === end) return;
-
     const selection = inputText.substring(start, end).trim();
-    
     if (selection && selection.length > 0) {
-      setManualFragments(prev => {
-        if (prev.includes(selection)) {
-          // 如果已选中，则移除（取消碎片）
-          return prev.filter(f => f !== selection);
-        } else {
-          // 否则添加
-          return [...prev, selection];
-        }
-      });
-      // 这里的逻辑确保了碎片的“最后固定结果”由当前 manualFragments 数组决定
-      
-      // 清除浏览器默认选中，保持交互流畅
-      if (window.getSelection) {
-        window.getSelection()?.removeAllRanges();
+      if (manualFragments.includes(selection)) {
+        setManualFragments(prev => prev.filter(f => f !== selection));
+      } else {
+        setManualFragments(prev => [...prev, selection]);
       }
+      textareaRef.current.setSelectionRange(end, end);
     }
   };
 
@@ -165,7 +138,6 @@ const App: React.FC = () => {
     const z = Math.sin(angle) * r;
     const y = (Math.random() - 0.5) * 10;
     const randomSize = 0.6 + Math.random() * 0.9;
-
     const newStar: StarPoint = {
       id: Math.random().toString(36).substr(2, 9),
       entryId,
@@ -180,43 +152,33 @@ const App: React.FC = () => {
 
   const handleRealizeStardust = async () => {
     if (!inputText.trim()) return;
-
     setLoading(true);
     try {
-      // 总是请求 Gemini 进行分类
-      const aiResult = await extractFragments(inputText, categories);
+      const { fragments: geminiFragments, categoryId } = await extractFragments(inputText, categories);
+      const finalFragments = manualFragments.length > 0 ? manualFragments : geminiFragments;
       
-      // 认定碎片的逻辑：
-      // 如果用户有手动选择，则使用手动选择的片段；
-      // 如果没有，则使用 Gemini 自动提取的片段。
-      const finalFragments = manualFragments.length > 0 ? manualFragments : aiResult.fragments;
-
       const newEntry: DiaryEntry = {
         id: Date.now().toString(),
         text: inputText,
         timestamp: Date.now(),
-        category: aiResult.categoryId,
+        category: categoryId,
         fragments: finalFragments
       };
-
       setEntries(prev => [newEntry, ...prev]);
-
-      // 将碎片转化为待绑定的星尘
+      
       const frags = finalFragments.map(f => ({
         id: Math.random().toString(36).substr(2, 9),
         text: f,
-        category: aiResult.categoryId,
+        category: categoryId,
         entryId: newEntry.id
       }));
-
-      setPendingFragments(prev => [...prev, ...frags]);
       
-      // 重置写作状态
+      setPendingFragments(prev => [...prev, ...frags]);
       setIsWriting(false);
       setInputText('');
       setManualFragments([]);
     } catch (err) { 
-      console.error("Realization failed:", err); 
+      console.error(err); 
     } finally { 
       setLoading(false); 
     }
@@ -246,22 +208,18 @@ const App: React.FC = () => {
   };
 
   const hoveredStar = useMemo(() => stars.find(s => s.id === hoveredStarId), [stars, hoveredStarId]);
-
   const categoryFragments = useMemo(() => {
     if (!activeCategory) return [];
     return stars.filter(s => s.category === activeCategory);
   }, [stars, activeCategory]);
-
-  const activeCategoryInfo = useMemo(() => 
-    categories.find(c => c.id === activeCategory), 
-  [activeCategory, categories]);
+  const activeCategoryInfo = useMemo(() => categories.find(c => c.id === activeCategory), [activeCategory, categories]);
 
   return (
-    <div className="relative w-screen h-screen bg-black text-white overflow-hidden selection:bg-cyan-500/40 serif-tracking">
+    <div className="relative w-screen h-screen bg-black text-white overflow-hidden selection:bg-white/30 serif-tracking">
       <div className="absolute inset-0 z-0">
         <Canvas dpr={[1, 2]} onPointerMissed={() => setActiveCategory(null)}>
-          <PerspectiveCamera makeDefault position={CAMERA_START_POS} fov={50} />
-          <OrbitControls enableDamping dampingFactor={0.05} minDistance={10} maxDistance={600} />
+          <PerspectiveCamera makeDefault position={CAMERA_START_POS} fov={50} near={0.1} far={10000} />
+          <OrbitControls enableDamping dampingFactor={0.05} minDistance={1} maxDistance={800} />
           <Nebula 
             stars={stars} 
             categories={categories}
@@ -299,8 +257,7 @@ const App: React.FC = () => {
       </AnimatePresence>
 
       <div className="absolute top-10 right-10 z-10 flex items-center gap-4">
-        <button onClick={() => { setHistoryOpen(!historyOpen); setActiveCategory(null); }} className="glass-hud bright-edge px-8 py-4 rounded-full text-[13px] font-normal tracking-[0.2em] uppercase hover:bg-white/10 transition-all flex items-center gap-5 group text-white">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_12px_cyan] group-hover:scale-125 transition-transform" />
+        <button onClick={() => { setHistoryOpen(!historyOpen); setActiveCategory(null); }} className="glass-hud bright-edge px-8 py-4 rounded-full text-[13px] font-normal tracking-[0.2em] uppercase hover:bg-white/10 transition-all text-white">
           时光回溯
         </button>
       </div>
@@ -311,13 +268,10 @@ const App: React.FC = () => {
             layout
             initial={{ opacity: 0, scale: 0.95, x: 50 }} 
             animate={{ 
-              opacity: 1, 
-              scale: 1, 
-              x: 0,
+              opacity: 1, scale: 1, x: 0,
               width: historyFullscreen ? "calc(100% - 80px)" : "28rem",
               height: historyFullscreen ? "calc(100% - 160px)" : "auto",
-              bottom: "32px",
-              right: historyFullscreen ? "40px" : "40px",
+              bottom: "32px", right: "40px",
               top: historyFullscreen ? "80px" : "128px"
             }} 
             exit={{ opacity: 0, scale: 0.95, x: 50 }} 
@@ -326,26 +280,19 @@ const App: React.FC = () => {
             <div className="flex justify-between items-center mb-12">
               <h3 className="text-[12px] font-normal uppercase tracking-[0.4em] opacity-80 italic text-white">星尘归档</h3>
               <div className="flex items-center gap-6">
-                <button 
-                  onClick={() => setHistoryFullscreen(!historyFullscreen)} 
-                  className="opacity-70 hover:opacity-100 transition-all p-2 rounded-full hover:bg-white/5 text-white"
-                >
+                <button onClick={() => setHistoryFullscreen(!historyFullscreen)} className="opacity-70 text-white">
                   {historyFullscreen ? <ShrinkIcon /> : <FullscreenIcon />}
                 </button>
-                <button onClick={() => { setHistoryOpen(false); setHistoryFullscreen(false); }} className="hover:text-white transition-colors opacity-60 p-2 text-white">✕</button>
+                <button onClick={() => { setHistoryOpen(false); setHistoryFullscreen(false); }} className="opacity-60 text-white">✕</button>
               </div>
             </div>
             <div className={`flex-1 overflow-y-auto no-scrollbar ${historyFullscreen ? 'grid grid-cols-2 lg:grid-cols-3 gap-10 pb-10' : 'space-y-10'}`}>
-              {entries.length === 0 ? <p className="text-white/50 italic text-base font-light text-center py-10">浩瀚星空，静候你的记忆...</p> : (
-                entries.map(e => {
-                  return (
-                    <div key={e.id} onClick={() => { setSelectedEntry(e); }} className="p-7 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-white/20 hover:bg-white/[0.04] cursor-pointer transition-all group h-fit text-white">
-                      <div className="text-[12px] font-light opacity-60 mb-4 tracking-widest uppercase italic">{new Date(e.timestamp).toLocaleDateString()}</div>
-                      <div className={`text-base font-light leading-relaxed opacity-90 group-hover:opacity-100 ${historyFullscreen ? 'line-clamp-4' : 'line-clamp-2'}`}>{e.text}</div>
-                    </div>
-                  );
-                })
-              )}
+              {entries.map(e => (
+                <div key={e.id} onClick={() => { setSelectedEntry(e); }} className="p-7 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-white/20 hover:bg-white/[0.04] cursor-pointer transition-all group h-fit text-white">
+                  <div className="text-[12px] font-light opacity-60 mb-4 tracking-widest uppercase italic">{new Date(e.timestamp).toLocaleDateString()}</div>
+                  <div className={`text-base font-light leading-relaxed opacity-90 group-hover:opacity-100 ${historyFullscreen ? 'line-clamp-4' : 'line-clamp-2'}`}>{e.text}</div>
+                </div>
+              ))}
             </div>
           </motion.div>
         )}
@@ -357,13 +304,10 @@ const App: React.FC = () => {
             layout
             initial={{ opacity: 0, scale: 0.95, x: 50 }} 
             animate={{ 
-              opacity: 1, 
-              scale: 1, 
-              x: 0,
+              opacity: 1, scale: 1, x: 0,
               width: categoryFullscreen ? "calc(100% - 80px)" : "26rem",
               height: categoryFullscreen ? "calc(100% - 160px)" : "auto",
-              bottom: "40px",
-              right: "40px",
+              bottom: "40px", right: "40px",
               top: categoryFullscreen ? "80px" : "128px"
             }} 
             exit={{ opacity: 0, scale: 0.95, x: 50 }} 
@@ -371,49 +315,32 @@ const App: React.FC = () => {
           >
             <div className="flex justify-between items-center mb-10">
               <div className="flex items-center gap-5">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: activeCategoryInfo?.color, boxShadow: activeCategoryInfo?.glow }} />
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: activeCategoryInfo?.color }} />
                 <h3 className="text-[14px] font-normal uppercase tracking-[0.4em] opacity-100">{activeCategoryInfo?.name}</h3>
               </div>
               <div className="flex items-center gap-6">
-                 <button 
-                  onClick={() => setCategoryFullscreen(!categoryFullscreen)} 
-                  className="opacity-70 hover:opacity-100 transition-all p-2 rounded-full hover:bg-white/5 text-white"
-                >
+                 <button onClick={() => setCategoryFullscreen(!categoryFullscreen)} className="opacity-70 text-white">
                   {categoryFullscreen ? <ShrinkIcon /> : <FullscreenIcon />}
                 </button>
-                <button onClick={() => { setActiveCategory(null); setCategoryFullscreen(false); }} className="opacity-60 hover:opacity-100 transition-all text-sm font-light p-2 text-white">✕</button>
+                <button onClick={() => { setActiveCategory(null); setCategoryFullscreen(false); }} className="opacity-60 text-white">✕</button>
               </div>
             </div>
-            
             <div className={`flex-1 overflow-y-auto no-scrollbar ${categoryFullscreen ? 'grid grid-cols-2 lg:grid-cols-4 gap-8 pb-8' : 'space-y-6'}`}>
-              {categoryFragments.length === 0 ? (
-                <p className="text-white/50 italic text-base text-center mt-16 font-light col-span-full">该星系尚未凝结碎片...</p>
-              ) : (
-                categoryFragments.map((star) => (
-                  <motion.div 
-                    key={star.id} 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    onMouseEnter={() => setHoveredStarId(star.id)}
-                    onMouseLeave={() => setHoveredStarId(null)}
-                    onClick={() => {
-                      const entry = entries.find(e => e.id === star.entryId);
-                      if (entry) setSelectedEntry(entry);
-                    }}
-                    className={`p-6 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-white/30 cursor-pointer transition-all group h-fit ${hoveredStarId === star.id ? 'bg-white/[0.06] border-white/40 shadow-xl' : ''}`}
-                  >
-                    <div className="text-base italic font-light leading-relaxed opacity-95 group-hover:opacity-100 transition-opacity text-white">
-                      “ {star.content} ”
-                    </div>
-                  </motion.div>
-                ))
-              )}
+              {categoryFragments.map((star) => (
+                <motion.div 
+                  key={star.id} 
+                  initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+                  onMouseEnter={() => setHoveredStarId(star.id)} onMouseLeave={() => setHoveredStarId(null)}
+                  onClick={() => {
+                    const entry = entries.find(e => e.id === star.entryId);
+                    if (entry) setSelectedEntry(entry);
+                  }}
+                  className={`p-6 rounded-3xl bg-white/[0.02] border border-white/5 hover:border-white/30 cursor-pointer transition-all group h-fit ${hoveredStarId === star.id ? 'bg-white/[0.06] border-white/40' : ''}`}
+                >
+                  <div className="text-base italic font-light leading-relaxed text-white">“ {star.content} ”</div>
+                </motion.div>
+              ))}
             </div>
-            {!categoryFullscreen && (
-              <div className="text-[11px] font-light uppercase tracking-[0.5em] opacity-70 text-center italic mt-4 text-white">
-                已收集: {categoryFragments.length} 碎片
-              </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -423,87 +350,31 @@ const App: React.FC = () => {
           <motion.button 
             initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             onClick={() => setIsWriting(true)} 
-            className="glass-hud bright-edge h-12 w-full max-w-[450px] rounded-full text-[15px] font-light tracking-[1em] uppercase hover:bg-white/15 hover:scale-105 active:scale-95 transition-all flex items-center justify-center shadow-2xl group overflow-hidden border border-white/20"
+            className="glass-hud bright-edge h-12 w-full max-w-[450px] rounded-full text-[15px] font-light tracking-[1em] uppercase hover:bg-white/15 transition-all text-white border border-white/20"
           >
-            <span className="relative z-10 transition-all group-hover:tracking-[1.4em] text-white">记录日记</span>
+            记录星尘
           </motion.button>
         )}
       </div>
 
       <AnimatePresence>
         {isWriting && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
-            className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/98 backdrop-blur-[60px]"
-          >
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/98 backdrop-blur-[60px]">
             <div className="relative w-full max-w-[80rem] flex flex-col items-center h-full">
-              {/* 碎片选取管理工具条 */}
-              <div className="w-full flex justify-between items-center px-10 pt-10">
-                 <div className="flex flex-col">
-                    <span className="text-[10px] uppercase tracking-[0.4em] text-cyan-400 font-bold mb-1">已捕捉碎片 ({manualFragments.length})</span>
-                    <div className="flex gap-2 flex-wrap max-w-xl">
-                      {manualFragments.length === 0 ? (
-                        <span className="text-[11px] text-white/30 italic uppercase tracking-widest">选取文字以凝结星尘...</span>
-                      ) : (
-                        manualFragments.map((f, i) => (
-                          <motion.div 
-                            key={i} 
-                            initial={{ scale: 0 }} animate={{ scale: 1 }}
-                            className="bg-cyan-500/20 border border-cyan-500/40 px-3 py-1 rounded-full text-[11px] flex items-center gap-2 group cursor-pointer hover:bg-cyan-500/40 transition-colors"
-                            onClick={() => setManualFragments(prev => prev.filter(frag => frag !== f))}
-                          >
-                            <span className="truncate max-w-[100px]">{f}</span>
-                            <span className="opacity-50 group-hover:opacity-100">✕</span>
-                          </motion.div>
-                        ))
-                      )}
-                    </div>
-                 </div>
-                 <button onClick={() => { setIsWriting(false); setManualFragments([]); }} className="text-[12px] opacity-40 hover:opacity-100 transition-opacity uppercase tracking-widest">取消</button>
-              </div>
-
-              <div className="relative w-full flex-1 flex flex-col items-center justify-center max-h-[50vh] mt-[2vh]">
+              <div className="relative w-full flex-1 flex flex-col items-center justify-center max-h-[50vh] mt-[5vh]">
                 <div className="absolute inset-0 pointer-events-none text-2xl md:text-3xl font-light text-center leading-[1.8] px-8 select-none overflow-y-auto no-scrollbar tracking-wide">
-                  <InteractiveDiaryText 
-                    text={inputText} 
-                    fragments={manualFragments} 
-                    color="#22d3ee" 
-                    isEditing={true} 
-                  />
+                  <InteractiveDiaryText text={inputText} fragments={manualFragments} color="#22d3ee" isEditing={true} />
                 </div>
-
                 <textarea 
-                  ref={textareaRef}
-                  autoFocus 
-                  value={inputText} 
-                  onChange={(e) => setInputText(e.target.value)}
-                  onMouseUp={handleTextSelection}
-                  placeholder="在这一刻，记录你的星尘记忆..." 
-                  className="w-full h-full bg-transparent border-none outline-none resize-none text-2xl md:text-3xl font-light text-center placeholder:text-white/20 no-scrollbar leading-[1.8] text-transparent caret-white tracking-wide z-10" 
+                  ref={textareaRef} autoFocus value={inputText} onChange={(e) => setInputText(e.target.value)} onMouseUp={handleTextSelection}
+                  placeholder="记录此刻的星尘..." className="w-full h-full bg-transparent border-none outline-none resize-none text-2xl md:text-3xl font-light text-center placeholder:text-white/40 no-scrollbar leading-[1.8] text-transparent caret-white" 
                 />
               </div>
-
-              <div className="mt-8 text-[11px] md:text-[12px] font-normal uppercase tracking-[0.6em] text-white animate-pulse italic text-center max-w-md opacity-60">
-                提示：选中文字即凝结星尘，再次选择该段文字或点击上方列表可取消
-              </div>
-              
-              <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col md:flex-row items-center gap-8 md:gap-32 mt-8 py-10 border-t border-white/10 w-full justify-center">
-                <button 
-                  disabled={loading || !inputText.trim()} 
-                  onClick={handleRealizeStardust} 
-                  className="px-20 md:px-40 py-5 bg-white/20 hover:bg-white/30 text-white rounded-full font-normal text-[16px] uppercase tracking-[1.2em] transition-all disabled:opacity-20 border border-white/50 shadow-lg relative group overflow-hidden"
-                >
-                  <span className="relative z-10">{loading ? '感应中...' : '具现'}</span>
-                  {manualFragments.length === 0 && !loading && (
-                    <div className="absolute inset-0 bg-cyan-500/10 animate-pulse pointer-events-none" />
-                  )}
-                </button>
+              <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} className="flex gap-16 mt-12 py-10 border-t border-white/10 w-full justify-center items-center">
+                <button onClick={() => { setIsWriting(false); setManualFragments([]); }} className="text-[14px] uppercase tracking-[0.4em] text-white/70 italic">放弃</button>
+                <button disabled={loading || !inputText.trim()} onClick={handleRealizeStardust} className="px-24 py-5 bg-white/15 hover:bg-white/25 text-white rounded-full font-normal uppercase tracking-[1em] border border-white/30">{loading ? '感应中...' : '具现'}</button>
+                <div className="text-[14px] uppercase tracking-[0.4em] text-white/70 italic">{manualFragments.length} 碎片</div>
               </motion.div>
-              {manualFragments.length === 0 && (
-                <div className="text-[10px] text-cyan-400/60 uppercase tracking-widest italic mb-10">
-                   * 未手动选取碎片，Gemini 将为您自动感应星尘
-                </div>
-              )}
             </div>
           </motion.div>
         )}
@@ -512,51 +383,37 @@ const App: React.FC = () => {
       <AnimatePresence>
         {selectedEntry && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 flex items-center justify-center z-[100] p-8 bg-black/70 backdrop-blur-3xl" onClick={() => { setSelectedEntry(null); setActiveCategory(null); }}>
-            <div className="glass-hud bright-edge p-10 md:p-20 rounded-[3rem] md:rounded-[5rem] max-w-6xl w-full relative shadow-3xl overflow-y-auto no-scrollbar max-h-[90vh] text-white" onClick={e => e.stopPropagation()}>
-              <button onClick={() => { setSelectedEntry(null); setActiveCategory(null); }} className="absolute top-10 right-10 text-3xl opacity-80 hover:opacity-100 transition-all font-light text-white">✕</button>
-              <div className="text-[12px] font-normal uppercase tracking-[0.8em] mb-10 md:mb-14 opacity-50 italic text-white/70 text-center">
-                {new Date(selectedEntry.timestamp).toLocaleString()}
-              </div>
-              <div className="text-2xl md:text-4xl font-light text-center leading-[1.7] mb-16 tracking-tight text-white">
-                <InteractiveDiaryText 
-                  text={selectedEntry.text} 
-                  fragments={selectedEntry.fragments} 
-                  color={categories.find(c => c.id === selectedEntry.category)?.color || '#fff'} 
-                  isEditing={false}
-                  isLarge={true}
-                />
+            <div className="glass-hud bright-edge p-10 md:p-20 rounded-[4rem] max-w-6xl w-full relative overflow-y-auto no-scrollbar max-h-[90vh] text-white" onClick={e => e.stopPropagation()}>
+              <button onClick={() => { setSelectedEntry(null); setActiveCategory(null); }} className="absolute top-10 right-10 text-3xl font-light text-white">✕</button>
+              <div className="text-[12px] font-normal uppercase tracking-[0.8em] mb-14 opacity-50 italic text-white/70">{new Date(selectedEntry.timestamp).toLocaleString()}</div>
+              <div className="text-2xl md:text-4xl font-light text-center leading-[1.7] tracking-tight text-white">
+                <InteractiveDiaryText text={selectedEntry.text} fragments={selectedEntry.fragments} color={categories.find(c => c.id === selectedEntry.category)?.color || '#fff'} isEditing={false} isLarge={true} />
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="absolute left-6 md:left-14 top-0 bottom-0 flex flex-col justify-center py-24 z-10 pointer-events-none">
-        <div className="flex flex-col gap-10 overflow-y-auto no-scrollbar py-12 px-4 max-h-full pointer-events-auto">
+      <div className="absolute left-10 top-0 bottom-0 flex flex-col justify-center py-24 z-10 pointer-events-none">
+        <div className="flex flex-col gap-10 pointer-events-auto">
           {categories.map((info) => (
             <motion.div 
-              key={info.id} 
+              key={info.id} onClick={() => { setActiveCategory(info.id === activeCategory ? null : info.id); setHistoryOpen(false); }}
               animate={isDraggingAny ? { scale: [1, 1.05, 1], opacity: [0.7, 1, 0.7] } : { scale: 1, opacity: 1 }}
-              transition={isDraggingAny ? { repeat: Infinity, duration: 2, ease: "easeInOut" } : {}}
-              className="group flex items-center gap-6 md:gap-10 cursor-pointer" 
-              onClick={() => { setActiveCategory(info.id === activeCategory ? null : info.id); setHistoryOpen(false); }}
+              transition={isDraggingAny ? { repeat: Infinity, duration: 2 } : {}}
+              className="group flex items-center gap-6 cursor-pointer"
             >
-              <div 
-                className={`w-10 h-10 md:w-13 md:h-13 rounded-full border border-white/20 transition-all duration-1000 relative flex items-center justify-center group-hover:scale-110 ${activeCategory === info.id ? 'ring-1 ring-white ring-offset-[8px] ring-offset-black' : ''}`} 
-                style={{ backgroundColor: info.color + '20', boxShadow: info.glow }}
-              >
-                 <div className="absolute inset-0 rounded-full animate-pulse blur-3xl opacity-40" style={{ backgroundColor: info.color }} />
-                 <div className="w-2.5 h-2.5 rounded-full z-10 shadow-[0_0_12px_rgba(255,255,255,0.7)]" style={{ backgroundColor: info.color }} />
+              <div className={`w-12 h-12 rounded-full border border-white/20 relative flex items-center justify-center group-hover:scale-110 transition-transform ${activeCategory === info.id ? 'ring-1 ring-white ring-offset-8 ring-offset-black' : ''}`} style={{ backgroundColor: info.color + '15' }}>
+                 <div className="w-2 h-2 rounded-full z-10" style={{ backgroundColor: info.color }} />
               </div>
-              <span className="text-[12px] md:text-[13px] font-light uppercase tracking-[0.6em] text-white/80 group-hover:text-white transition-all select-none whitespace-nowrap italic">{info.name}</span>
+              <span className="text-[12px] uppercase tracking-[0.4em] text-white/80 italic group-hover:text-white transition-colors">{info.name}</span>
             </motion.div>
           ))}
-
-          <div className="group flex items-center gap-6 md:gap-10 cursor-pointer pt-4" onClick={() => setIsAddingCategory(true)}>
-            <div className="w-10 h-10 md:w-13 md:h-13 rounded-full border-2 border-white/50 hover:border-white/100 transition-all flex items-center justify-center group-hover:scale-110 bg-white/[0.1] shadow-[0_0_20px_rgba(255,255,255,0.3)]">
-               <span className="text-xl md:text-2xl font-light text-white group-hover:scale-125 transition-transform">+</span>
+          <div className="group flex items-center gap-6 cursor-pointer pt-4" onClick={() => setIsAddingCategory(true)}>
+            <div className="w-12 h-12 rounded-full border-2 border-white/30 flex items-center justify-center bg-white/5 hover:bg-white/15 transition-all group-hover:scale-110">
+               <span className="text-2xl font-light text-white">+</span>
             </div>
-            <span className="text-[12px] md:text-[13px] font-light uppercase tracking-[0.6em] text-white group-hover:text-white transition-all select-none whitespace-nowrap italic">添加分类</span>
+            <span className="text-[12px] uppercase tracking-[0.4em] text-white/80 italic">添加分类</span>
           </div>
         </div>
       </div>
@@ -564,25 +421,16 @@ const App: React.FC = () => {
       <AnimatePresence>
         {isAddingCategory && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 flex items-center justify-center z-[110] bg-black/90 backdrop-blur-2xl" onClick={() => setIsAddingCategory(false)}>
-            <motion.div 
-              initial={{ scale: 0.98, y: 30 }} animate={{ scale: 1, y: 0 }} 
-              className="glass-hud bright-edge p-10 md:p-16 rounded-[2.5rem] md:rounded-[3.5rem] w-[90vw] max-w-[30rem] flex flex-col items-center shadow-3xl text-white" 
-              onClick={e => e.stopPropagation()}
-            >
-              <h4 className="text-[12px] font-normal uppercase tracking-[0.8em] mb-12 opacity-60 italic text-white">创建新星系</h4>
+            <motion.div initial={{ scale: 0.98, y: 30 }} animate={{ scale: 1, y: 0 }} className="glass-hud p-16 rounded-[3.5rem] w-full max-w-md flex flex-col items-center" onClick={e => e.stopPropagation()}>
+              <h4 className="text-[12px] uppercase tracking-[0.6em] mb-12 opacity-60 italic text-white">创建新星系</h4>
               <input 
-                autoFocus
-                type="text" 
-                maxLength={8}
-                value={newCatName} 
-                onChange={e => setNewCatName(e.target.value)} 
-                onKeyDown={e => e.key === 'Enter' && handleCreateCategory()}
-                placeholder="为星尘命名..." 
-                className="w-full bg-white/[0.1] border border-white/20 rounded-3xl px-8 py-5 text-xl font-light text-center outline-none focus:border-white/50 transition-all mb-12 text-white placeholder:text-white/40"
+                autoFocus type="text" maxLength={8} value={newCatName} onChange={e => setNewCatName(e.target.value)} 
+                onKeyDown={e => e.key === 'Enter' && handleCreateCategory()} placeholder="命名星尘..." 
+                className="w-full bg-white/5 border border-white/20 rounded-3xl px-8 py-5 text-xl font-light text-center outline-none focus:border-white/50 transition-all mb-12 text-white"
               />
-              <div className="flex gap-6 md:gap-8 w-full">
-                <button onClick={() => setIsAddingCategory(false)} className="flex-1 py-5 rounded-3xl text-[12px] font-light uppercase tracking-[0.4em] text-white/70 hover:text-white transition-all italic">取消</button>
-                <button onClick={handleCreateCategory} className="flex-1 py-5 bg-white/20 hover:bg-white/30 rounded-3xl text-[12px] font-normal uppercase tracking-[0.6em] transition-all text-white border border-white/30">开启</button>
+              <div className="flex gap-8 w-full">
+                <button onClick={() => setIsAddingCategory(false)} className="flex-1 py-5 text-[12px] uppercase tracking-[0.4em] text-white/50 italic">取消</button>
+                <button onClick={handleCreateCategory} className="flex-1 py-5 bg-white/10 rounded-3xl text-[12px] uppercase tracking-[0.4em] text-white border border-white/20">开启</button>
               </div>
             </motion.div>
           </motion.div>
@@ -591,42 +439,19 @@ const App: React.FC = () => {
 
       <AnimatePresence>
         {pendingFragments.length > 0 && (
-          <motion.div initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} className="absolute top-32 right-6 md:right-16 bottom-40 w-72 md:w-96 flex flex-col items-end gap-6 md:gap-10 z-20 overflow-y-auto no-scrollbar py-8 text-white">
-            <div className="text-[11px] font-normal uppercase tracking-[0.5em] text-white/50 mb-4 text-right italic">未绑定的星尘 (拖拽至左侧释放)</div>
+          <div className="absolute top-32 right-12 bottom-40 w-80 flex flex-col items-end gap-8 z-20 overflow-y-auto no-scrollbar py-8">
             {pendingFragments.map((frag) => (
               <motion.div 
-                key={frag.id} 
-                layout
-                drag 
-                dragSnapToOrigin 
-                dragElastic={0.1}
-                dragMomentum={false}
-                onDragStart={() => setIsDraggingAny(true)}
-                onDragEnd={(_, info) => { 
-                  setIsDraggingAny(false);
-                  // 当拖拽超过一定距离（向左）则视为具现到星云
-                  if (info.point.x < window.innerWidth - 450) handleFragmentDrop(frag.id, frag.category, frag.entryId); 
-                }} 
-                whileDrag={{ 
-                  scale: 0.95, 
-                  opacity: 0.9, 
-                  zIndex: 200, 
-                  boxShadow: "0 0 30px rgba(34, 211, 238, 0.4)",
-                  borderColor: "rgba(34, 211, 238, 0.6)"
-                }}
-                className="glass-hud bright-edge p-6 md:p-8 rounded-[2rem] md:rounded-[2.5rem] cursor-grab active:cursor-grabbing text-[14px] md:text-[15px] italic font-light leading-relaxed opacity-90 hover:opacity-100 hover:bg-white/[0.08] transition-all w-full shadow-2xl text-white relative group"
+                key={frag.id} layout drag dragSnapToOrigin dragElastic={0.05} onDragStart={() => setIsDraggingAny(true)}
+                onDragEnd={(_, info) => { setIsDraggingAny(false); if (info.point.x < 350) handleFragmentDrop(frag.id, frag.category, frag.entryId); }} 
+                whileDrag={{ scale: 0.9, opacity: 0.8, zIndex: 200 }}
+                className="glass-hud p-8 rounded-[2.5rem] cursor-grab active:cursor-grabbing text-[14px] italic font-light leading-relaxed w-full shadow-2xl text-white relative group"
               >
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: isDraggingAny ? 1 : 0 }}
-                  className="absolute -top-3 -left-3 pointer-events-none"
-                >
-                  <DragCursorIcon />
-                </motion.div>
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: isDraggingAny ? 1 : 0 }} className="absolute -top-3 -left-3"><DragCursorIcon /></motion.div>
                 “ {frag.text} ”
               </motion.div>
             ))}
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -634,9 +459,8 @@ const App: React.FC = () => {
         {loading && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/95 backdrop-blur-[50px] flex items-center justify-center z-[120]">
             <div className="flex flex-col items-center gap-12">
-               <div className="w-16 h-16 border border-white/30 border-t-white/100 rounded-full animate-spin" />
-               <div className="text-[14px] font-light uppercase tracking-[1.2em] text-white/80 animate-pulse text-center">感应星辰中...</div>
-               <div className="text-[11px] text-white/40 tracking-[0.4em] uppercase">正在通过 Gemini 编织碎片</div>
+               <div className="w-16 h-16 border border-white/30 border-t-white animate-spin rounded-full" />
+               <div className="text-[14px] font-light uppercase tracking-[1em] text-white animate-pulse">感应中...</div>
             </div>
           </motion.div>
         )}
