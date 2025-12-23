@@ -1,5 +1,5 @@
 
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Category, CategoryInfo, StarPoint } from '../types';
@@ -32,6 +32,7 @@ const ROTATION_SPEED = 0.035;
 const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories }) => {
   const meshRef = useRef<THREE.Mesh>(null!);
   
+  // 准备固定长度的颜色数组，防止着色器 uniform 长度不匹配
   const categoryColors = useMemo(() => {
     const colors = new Array(8).fill(new THREE.Color(0, 0, 0));
     categories.slice(0, 8).forEach((c, i) => {
@@ -65,7 +66,7 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
       }
 
       void main() {
-        vec3 color = vec3(0.005, 0.005, 0.015);
+        vec3 color = vec3(0.005, 0.005, 0.015); // 更深邃的底色
         
         for(int i=0; i<8; i++) {
             float idx = float(i);
@@ -86,7 +87,7 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
   const starPositions = useMemo(() => {
     const pos = new Float32Array(BACKGROUND_STAR_COUNT * 3);
     for (let i = 0; i < BACKGROUND_STAR_COUNT; i++) {
-      const r = 500 + Math.random() * 200;
+      const r = 250 + Math.random() * 150;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(2 * Math.random() - 1);
       pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
@@ -98,25 +99,24 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
 
   useFrame((state) => {
     if (meshRef.current) {
-      // FIX: Cast meshRef.current.material to any to access uniforms as it is a ShaderMaterial
+      // FIX: Cast material to any to access uniforms property as THREE.Mesh.material type doesn't include it.
       (meshRef.current.material as any).uniforms.uTime.value = state.clock.getElapsedTime();
     }
   });
 
   return (
     <Group>
-      <Mesh ref={meshRef} renderOrder={-10}>
-        <SphereGeometry args={[900, 32, 32]} />
+      <Mesh ref={meshRef}>
+        <SphereGeometry args={[450, 32, 32]} />
         <ShaderMaterial 
           {...cosmosShader}
           side={THREE.BackSide}
           transparent
           depthWrite={false}
-          depthTest={true}
         />
       </Mesh>
       
-      <Points frustumCulled={false} renderOrder={-9}>
+      <Points>
         <BufferGeometry>
           <BufferAttribute 
             attach="attributes-position" 
@@ -126,13 +126,12 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
           />
         </BufferGeometry>
         <PointsMaterial 
-          size={0.25} 
+          size={0.18} 
           color="#ffffff" 
           transparent 
-          opacity={0.3} 
+          opacity={0.25} 
           blending={THREE.AdditiveBlending}
           depthWrite={false}
-          depthTest={true}
         />
       </Points>
     </Group>
@@ -169,7 +168,7 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
   if (!lineGeometry) return null;
 
   return (
-    <LineSegments geometry={lineGeometry} frustumCulled={false} renderOrder={5}>
+    <LineSegments geometry={lineGeometry}>
       <LineBasicMaterial 
         ref={lineMaterialRef}
         color="#ffffff" 
@@ -177,7 +176,6 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
         opacity={0.2} 
         blending={THREE.AdditiveBlending}
         depthWrite={false}
-        depthTest={true}
       />
     </LineSegments>
   );
@@ -321,8 +319,6 @@ const FragmentStar: React.FC<{
       onClick={onClick}
       onPointerOver={onPointerOver}
       onPointerOut={onPointerOut}
-      frustumCulled={false}
-      renderOrder={10}
     >
       <PlaneGeometry args={[star.size * 5.0, star.size * 5.0]} />
       <ShaderMaterial 
@@ -330,7 +326,6 @@ const FragmentStar: React.FC<{
         transparent
         blending={THREE.AdditiveBlending}
         depthWrite={false}
-        depthTest={true}
         uniforms={{
           uColor: { value: jitteredColor },
           uTime: { value: 0 },
@@ -416,20 +411,13 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
     return { positions, colors, flickerOffsets, sizes };
   }, [categories]);
 
-  // 显式计算包围球，防止翻转时被剔除
-  useEffect(() => {
-    if (nebulaRef.current && nebulaRef.current.geometry) {
-      nebulaRef.current.geometry.computeBoundingSphere();
-    }
-  }, [nebulaData]);
-
   useFrame((state) => {
     const time = state.clock.getElapsedTime();
     const currentRotation = time * ROTATION_SPEED;
     if (nebulaRef.current) nebulaRef.current.rotation.y = currentRotation;
     if (fragmentGroupRef.current) fragmentGroupRef.current.rotation.y = currentRotation;
-    if (nebulaMaterialRef.current && nebulaMaterialRef.current.userData.shader) {
-      nebulaMaterialRef.current.userData.shader.uniforms.uTime.value = time;
+    if (nebulaMaterialRef.current && (nebulaMaterialRef.current as any).userData.shader) {
+      (nebulaMaterialRef.current as any).userData.shader.uniforms.uTime.value = time;
     }
   });
 
@@ -438,8 +426,8 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
       {/* 宇宙背景层 */}
       <CosmosBackground categories={categories} />
 
-      <Group position={[0, 0, 0]}>
-        <Points ref={nebulaRef} frustumCulled={false} renderOrder={1}>
+      <Group position={[12, 8, 0]}>
+        <Points ref={nebulaRef}>
           <BufferGeometry>
             <BufferAttribute attach="attributes-position" count={NEBULA_PARTICLE_COUNT} array={nebulaData.positions} itemSize={3} />
             <BufferAttribute attach="attributes-color" count={NEBULA_PARTICLE_COUNT} array={nebulaData.colors} itemSize={3} />
@@ -449,7 +437,7 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
           <PointsMaterial 
             ref={nebulaMaterialRef}
             size={0.42} vertexColors transparent opacity={0.65} 
-            blending={THREE.AdditiveBlending} depthWrite={false} depthTest={true} sizeAttenuation={true}
+            blending={THREE.AdditiveBlending} depthWrite={false} sizeAttenuation={true}
             onBeforeCompile={(shader) => {
               shader.uniforms.uTime = { value: 0 };
               shader.vertexShader = `
@@ -461,7 +449,7 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
               `.replace(`#include <begin_vertex>`, `#include <begin_vertex>\ngl_PointSize = size * aSize;`)
               .replace(`#include <color_vertex>`, `#include <color_vertex>\nfloat speed = 1.2 + fract(aFlicker * 0.123) * 1.8;\nvTwinkle = 0.15 + 0.85 * pow(0.5 + 0.5 * sin(uTime * speed + aFlicker), 2.5);`)
               .replace(`gl_FragColor = vec4( diffuse, opacity );`, `gl_FragColor = vec4( diffuse * vTwinkle, opacity );`);
-              nebulaMaterialRef.current.userData.shader = shader;
+              (nebulaMaterialRef.current as any).userData.shader = shader;
             }}
           />
         </Points>
