@@ -1,0 +1,7 @@
+{
+  "name": "Project Stardust",
+  "description": "An immersive 3D visualization diary that transforms text memories into a celestial nebula using Gemini AI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
