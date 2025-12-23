@@ -1,8 +1,9 @@
+
 import React, { useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { Category, CategoryInfo, StarPoint } from '../types';
-import { NEBULA_PARTICLE_COUNT, BACKGROUND_STAR_COUNT } from '../constants';
+import { Category, CategoryInfo, StarPoint } from '../types.ts';
+import { NEBULA_PARTICLE_COUNT, BACKGROUND_STAR_COUNT } from '../constants.ts';
 
 const Group = 'group' as any;
 const Points = 'points' as any;
@@ -42,7 +43,6 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
 
   useEffect(() => {
     if (geoRef.current) {
-      // 强制设置超大包围球，解决旋转黑屏消失的核心逻辑
       geoRef.current.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 10000);
     }
   }, []);
@@ -97,7 +97,8 @@ const CosmosBackground: React.FC<{ categories: CategoryInfo[] }> = ({ categories
 
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.material.uniforms.uTime.value = state.clock.getElapsedTime();
+      // Fix: cast material to any to access uniforms property which exists on ShaderMaterial
+      (meshRef.current.material as any).uniforms.uTime.value = state.clock.getElapsedTime();
     }
   });
 
@@ -149,7 +150,6 @@ const ConstellationLines: React.FC<{ stars: StarPoint[], activeCategory: Categor
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    // 手动设置巨大包围球防止剔除
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000);
     return geometry;
   }, [stars, activeCategory]);
@@ -372,7 +372,6 @@ const Nebula: React.FC<NebulaProps> = ({ stars, categories, onStarClick, hovered
 
   useEffect(() => {
     if (nebulaRef.current) {
-      // 核心稳定性：强制巨大的包围球，防止剔除黑屏
       nebulaRef.current.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0,0,0), 10000);
     }
   }, []);

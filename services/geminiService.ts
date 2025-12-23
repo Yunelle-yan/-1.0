@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Category, CategoryInfo } from "../types";
+import { Category, CategoryInfo } from "../types.ts";
 
 /**
  * 使用 Gemini 从日记原文中摘录最具代表性的原句，并对日记进行分类。

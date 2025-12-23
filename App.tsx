@@ -1,13 +1,14 @@
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { AnimatePresence, motion } from 'framer-motion';
 
-import Nebula from './components/Nebula';
-import { Category, DiaryEntry, StarPoint, CategoryInfo } from './types';
-import { DEFAULT_CATEGORIES, CAMERA_START_POS } from './constants';
-import { extractFragments } from './services/geminiService';
+import Nebula from './components/Nebula.tsx';
+import { Category, DiaryEntry, StarPoint, CategoryInfo } from './types.ts';
+import { DEFAULT_CATEGORIES, CAMERA_START_POS } from './constants.ts';
+import { extractFragments } from './services/geminiService.ts';
 
 const AmbientLight = 'ambientLight' as any;
 const PointLight = 'pointLight' as any;
@@ -188,6 +189,7 @@ const App: React.FC = () => {
     const frag = pendingFragments.find(f => f.id === fragId);
     if (frag) {
       spawnStar(frag.text, category, entryId);
+      // Fix: Filter by comparing fragId string with fragment object's id property
       setPendingFragments(prev => prev.filter(f => f.id !== fragId));
     }
   };
@@ -436,6 +438,8 @@ const App: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <div className="fixed bottom-10 right-10 text-[10px] uppercase tracking-[0.4em] opacity-30 text-white pointer-events-none">Project Stardust v1.0.1</div>
 
       <AnimatePresence>
         {pendingFragments.length > 0 && (
