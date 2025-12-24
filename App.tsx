@@ -32,6 +32,13 @@ const ListIcon = () => (
   </svg>
 );
 
+const TrashIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+  </svg>
+);
+
 const CameraController: React.FC<{ active: boolean }> = ({ active }) => {
   const controlsRef = useRef<any>(null);
   const targetX = active ? 20 : 0; 
@@ -88,10 +95,8 @@ const InteractiveDiaryText: React.FC<{
                   onFragmentClick(part);
                 }
               }}
-              // CRITICAL: 移除 px 和 mx。使用 inline 布局确保不产生宽度偏差。
-              className={`inline transition-all duration-300 ${isEditing ? 'cursor-pointer pointer-events-auto' : ''}`}
+              className={`inline transition-all duration-300 ${isEditing ? 'cursor-pointer pointer-events-auto hover:brightness-150' : ''}`}
               style={{ 
-                // 使用 box-shadow 替代 background 以获得稍宽的视觉效果而不影响布局
                 boxShadow: isEditing ? `inset 0 -2px 0 ${color}, 0 2px 8px ${color}33` : 'none',
                 backgroundColor: isEditing ? `${color}33` : 'transparent', 
                 color: isEditing ? '#fff' : 'inherit',
@@ -99,6 +104,7 @@ const InteractiveDiaryText: React.FC<{
                 margin: '0',
                 display: 'inline'
               }}
+              title={isEditing ? "点击移除标注" : undefined}
             >
               {part}
             </span>
@@ -207,6 +213,11 @@ const App: React.FC = () => {
     setStars(prev => [...prev, newStar]);
   };
 
+  const deleteStar = (starId: string) => {
+    setStars(prev => prev.filter(s => s.id !== starId));
+    if (hoveredStarId === starId) setHoveredStarId(null);
+  };
+
   const handleRealizeStardust = async () => {
     if (!inputText.trim()) return;
     setLoading(true);
@@ -235,6 +246,10 @@ const App: React.FC = () => {
       spawnStar(frag.text, category, entryId);
       setPendingFragments(prev => prev.filter(f => f.id !== fragId));
     }
+  };
+
+  const discardPendingFragment = (fragId: string) => {
+    setPendingFragments(prev => prev.filter(f => f.id !== fragId));
   };
 
   const updateNearestCategory = (point: { x: number, y: number }) => {
@@ -275,7 +290,6 @@ const App: React.FC = () => {
   }, [stars, activeCategory]);
   const activeCategoryInfo = useMemo(() => categories.find(c => c.id === activeCategory), [activeCategory, categories]);
 
-  // 同步文字渲染样式的共享常量 - 移除 tracking-wide 避免潜在的微差偏移，改用标准 tracking
   const SHARED_TEXT_STYLES = "text-2xl md:text-3xl font-light text-center leading-[1.8] tracking-normal whitespace-pre-wrap break-words px-12 py-8";
 
   return (
@@ -363,7 +377,7 @@ const App: React.FC = () => {
             layout initial={{ opacity: 0, x: -80 }} 
             animate={{ 
               opacity: 1, x: 0,
-              width: categoryFullscreen ? "calc(100% - 240px)" : "19rem",
+              width: categoryFullscreen ? "calc(100% - 240px)" : "22rem",
               height: "calc(100% - 200px)",
               left: "150px", top: "100px"
             }} 
@@ -383,19 +397,37 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className={`flex-1 overflow-y-auto no-scrollbar ${categoryFullscreen ? 'grid grid-cols-2 lg:grid-cols-3 gap-6 pb-6' : 'space-y-4'}`}>
-              {categoryFragments.map((star) => (
-                <motion.div 
-                  key={star.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-                  onMouseEnter={() => setHoveredStarId(star.id)} onMouseLeave={() => setHoveredStarId(null)}
-                  onClick={() => {
-                    const entry = entries.find(e => e.id === star.entryId);
-                    if (entry) setSelectedEntry(entry);
-                  }}
-                  className={`p-5 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-white/20 cursor-pointer transition-all group/item h-fit ${hoveredStarId === star.id ? 'bg-white/[0.06] border-white/30' : ''}`}
-                >
-                  <div className="text-[14px] italic font-light leading-relaxed text-white opacity-80 group-hover/item:opacity-100">“ {star.content} ”</div>
-                </motion.div>
-              ))}
+              <AnimatePresence mode="popLayout">
+                {categoryFragments.map((star) => (
+                  <motion.div 
+                    key={star.id} 
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }} 
+                    animate={{ opacity: 1, scale: 1 }} 
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    onMouseEnter={() => setHoveredStarId(star.id)} onMouseLeave={() => setHoveredStarId(null)}
+                    className={`relative p-5 pr-12 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-white/20 transition-all group/item h-fit ${hoveredStarId === star.id ? 'bg-white/[0.06] border-white/30' : ''}`}
+                  >
+                    <div 
+                      onClick={() => {
+                        const entry = entries.find(e => e.id === star.entryId);
+                        if (entry) setSelectedEntry(entry);
+                      }}
+                      className="text-[14px] italic font-light leading-relaxed text-white opacity-80 group-hover/item:opacity-100 cursor-pointer"
+                    >
+                      “ {star.content} ”
+                    </div>
+                    
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); deleteStar(star.id); }}
+                      className="absolute top-1/2 -translate-y-1/2 right-4 p-2 opacity-0 group-hover/item:opacity-40 hover:opacity-100 hover:text-red-400 transition-all"
+                      title="尘埃化（删除碎片）"
+                    >
+                      <TrashIcon />
+                    </button>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
               {categoryFragments.length === 0 && (
                 <div className="flex flex-col items-center justify-center h-full opacity-20 italic text-xs py-20">暂无碎片星尘</div>
               )}
@@ -421,7 +453,6 @@ const App: React.FC = () => {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-8 bg-black/98 backdrop-blur-[60px]">
             <div className="relative w-full max-w-[80rem] flex flex-col items-center h-full">
               <div className="relative w-full flex-1 max-h-[60vh] mt-[5vh] overflow-hidden">
-                {/* 视觉 Overlay 层：必须与 Textarea 样式完全同步 */}
                 <div 
                   ref={overlayRef}
                   className={`absolute inset-0 pointer-events-none select-none overflow-hidden ${SHARED_TEXT_STYLES}`}
@@ -432,7 +463,6 @@ const App: React.FC = () => {
                     color="#22d3ee" isEditing={true} onFragmentClick={removeManualFragment}
                   />
                 </div>
-                {/* 实际输入/交互层：文本设置为透明 */}
                 <textarea 
                   ref={textareaRef} 
                   autoFocus 
@@ -557,7 +587,7 @@ const App: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <div className="fixed bottom-10 right-10 text-[10px] uppercase tracking-[0.4em] opacity-20 text-white pointer-events-none">Project Stardust v1.0.9</div>
+      <div className="fixed bottom-10 right-10 text-[10px] uppercase tracking-[0.4em] opacity-20 text-white pointer-events-none">Project Stardust v1.1.0</div>
 
       <AnimatePresence>
         {pendingFragments.length > 0 && (
@@ -566,6 +596,9 @@ const App: React.FC = () => {
               <motion.div 
                 key={frag.id} 
                 layout 
+                initial={{ opacity: 0, x: 50 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.8 }}
                 drag 
                 dragSnapToOrigin 
                 dragElastic={0.02} 
@@ -585,9 +618,17 @@ const App: React.FC = () => {
                   filter: 'brightness(1.5)',
                   cursor: 'grabbing'
                 }}
-                className="glass-hud p-6 rounded-[2rem] cursor-grab active:cursor-grabbing text-[14px] italic font-medium leading-relaxed w-full shadow-2xl text-white pointer-events-auto border border-white/20 hover:border-white/40"
+                className="relative glass-hud p-6 pr-10 rounded-[2rem] cursor-grab active:cursor-grabbing text-[14px] italic font-medium leading-relaxed w-full shadow-2xl text-white pointer-events-auto border border-white/20 hover:border-white/40 group/pending"
               >
                 “ {frag.text} ”
+                
+                <button 
+                  onClick={(e) => { e.stopPropagation(); discardPendingFragment(frag.id); }}
+                  className="absolute top-4 right-4 p-1.5 opacity-0 group-hover/pending:opacity-40 hover:opacity-100 transition-opacity"
+                  title="放弃该碎片"
+                >
+                  ✕
+                </button>
               </motion.div>
             ))}
           </div>
