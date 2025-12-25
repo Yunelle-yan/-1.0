@@ -41,7 +41,8 @@ const TrashIcon = () => (
 
 const CameraController: React.FC<{ active: boolean }> = ({ active }) => {
   const controlsRef = useRef<any>(null);
-  const targetX = active ? 20 : 0; 
+  // 为了让物体向右移动，相机的观察目标（Target）需要向左偏移（负值）
+  const targetX = active ? -20 : 0; 
   
   useFrame(() => {
     if (controlsRef.current) {
@@ -76,8 +77,10 @@ const InteractiveDiaryText: React.FC<{
   if (!text) return null;
   if (!fragments || fragments.length === 0) return <span className={isEditing ? "opacity-100 text-white/70" : "opacity-90"}>{text}</span>;
 
-  const sortedFrags = [...new Set(fragments)].sort((a, b) => b.length - a.length);
-  const escapedFrags = sortedFrags.map(f => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  // Fix: Explicitly type sortedFrags to avoid 'unknown' property access error on line 80
+  const sortedFrags = Array.from(new Set(fragments)).sort((a: string, b: string) => b.length - a.length);
+  // Fix: Explicitly type 'f' to avoid 'unknown' property access error on line 81
+  const escapedFrags = sortedFrags.map((f: string) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedFrags.join('|')})`, 'g');
   const parts = text.split(regex);
 
@@ -223,7 +226,8 @@ const App: React.FC = () => {
     setLoading(true);
     try {
       const categoryId = await categorizeEntry(inputText, categories);
-      const finalFragments = [...new Set(manualFragments)];
+      // Fix: Cast explicitly to string[] to resolve 'unknown[]' assignability error on line 230
+      const finalFragments = Array.from(new Set(manualFragments)) as string[];
       const newEntry: DiaryEntry = {
         id: Date.now().toString(), text: inputText, timestamp: Date.now(),
         category: categoryId, fragments: finalFragments
@@ -257,8 +261,10 @@ const App: React.FC = () => {
     let minDistance = 160; 
 
     Object.entries(categoryRefs.current).forEach(([id, el]) => {
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
+      // Fix: Cast 'el' to HTMLDivElement or any to avoid 'unknown' error on line 262
+      const element = el as HTMLDivElement | null;
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
       const centerY = rect.top + rect.height / 2;
       const dist = Math.hypot(point.x - centerX, point.y - centerY);
