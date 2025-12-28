@@ -2,10 +2,10 @@
 import { CategoryInfo } from './types';
 
 export const DEFAULT_CATEGORIES: CategoryInfo[] = [
-  { id: 'reading', name: '阅读', color: '#3b82f6', glow: '0 0 20px #3b82f6' },
-  { id: 'learning', name: '学习', color: '#f97316', glow: '0 0 20px #f97316' },
-  { id: 'outfit', name: '尝试', color: '#a855f7', glow: '0 0 20px #a855f7' },
-  { id: 'emotion', name: '情绪', color: '#ec4899', glow: '0 0 20px #ec4899' }
+  { id: 'reading', name: '阅读', color: '#60a5fa', glow: '0 0 20px #60a5fa' }, // 浅蓝色
+  { id: 'learning', name: '学习', color: '#fb923c', glow: '0 0 20px #fb923c' }, // 橙色
+  { id: 'outfit', name: '尝试', color: '#c084fc', glow: '0 0 20px #c084fc' }, // 紫色
+  { id: 'emotion', name: '情绪', color: '#f472b6', glow: '0 0 20px #f472b6' }  // 粉红色
 ];
 
 export const NEBULA_PARTICLE_COUNT = 45000; 
