@@ -5,10 +5,10 @@ import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import { AnimatePresence, motion } from 'framer-motion';
 
-import Nebula from './components/Nebula.tsx';
-import { Category, DiaryEntry, StarPoint, CategoryInfo } from './types.ts';
-import { DEFAULT_CATEGORIES, CAMERA_START_POS } from './constants.ts';
-import { categorizeEntry } from './services/geminiService.ts';
+import Nebula from './components/Nebula';
+import { Category, DiaryEntry, StarPoint, CategoryInfo } from './types';
+import { DEFAULT_CATEGORIES, CAMERA_START_POS } from './constants';
+import { categorizeEntry } from './services/geminiService';
 
 const AmbientLight = 'ambientLight' as any;
 const PointLight = 'pointLight' as any;
@@ -77,9 +77,8 @@ const InteractiveDiaryText: React.FC<{
   if (!text) return null;
   if (!fragments || fragments.length === 0) return <span className={isEditing ? "opacity-100 text-white/70" : "opacity-90"}>{text}</span>;
 
-  // Fix: Explicitly type sortedFrags to avoid 'unknown' property access error on line 80
+  // Fix: Explicitly type sortedFrags to avoid 'unknown' property access error
   const sortedFrags = Array.from(new Set(fragments)).sort((a: string, b: string) => b.length - a.length);
-  // Fix: Explicitly type 'f' to avoid 'unknown' property access error on line 81
   const escapedFrags = sortedFrags.map((f: string) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   const regex = new RegExp(`(${escapedFrags.join('|')})`, 'g');
   const parts = text.split(regex);
@@ -226,7 +225,6 @@ const App: React.FC = () => {
     setLoading(true);
     try {
       const categoryId = await categorizeEntry(inputText, categories);
-      // Fix: Cast explicitly to string[] to resolve 'unknown[]' assignability error on line 230
       const finalFragments = Array.from(new Set(manualFragments)) as string[];
       const newEntry: DiaryEntry = {
         id: Date.now().toString(), text: inputText, timestamp: Date.now(),
@@ -261,7 +259,6 @@ const App: React.FC = () => {
     let minDistance = 160; 
 
     Object.entries(categoryRefs.current).forEach(([id, el]) => {
-      // Fix: Cast 'el' to HTMLDivElement or any to avoid 'unknown' error on line 262
       const element = el as HTMLDivElement | null;
       if (!element) return;
       const rect = element.getBoundingClientRect();
